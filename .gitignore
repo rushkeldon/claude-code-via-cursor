@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+*.tsbuildinfo
+
+# Packaged VSIXes — built locally, never committed
+*.vsix
+
+# Vite cache
+.vite/
+
+# VS Code extension test artifacts
+.vscode-test/
+.vscode-test-web/
+
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+._*
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Claude Code state, settings, hooks, plugin configs, etc.
+# Solo project — nothing in here is meant to be shared. If you ever want
+# to commit a specific file (a hook, a command, a marketplace pointer)
+# add an exception with !.claude/path/to/file below.
+.claude/
+
+# Editor — JetBrains
+.idea/
+*.iml
+
+# Editor — Vim / Emacs swap files
+*.swp
+*.swo
+*~
+
+# Backups from in-progress work
+backup/
+backup-files/
+*.bak
+
+# Old-repo reference directory (in case anyone symlinks it in)
+claude-code-chat/
+
+# Doc work that shouldn't ship
+doc/logs/
