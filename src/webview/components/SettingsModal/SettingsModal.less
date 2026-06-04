@@ -44,7 +44,6 @@
 }
 
 .settings-sub-fields {
-  margin-left: 24px;
   margin-top: 12px;
   display: flex;
   flex-direction: column;
@@ -77,7 +76,7 @@
     -webkit-appearance: none;
     width: auto;
     min-width: 200px;
-    max-width: 100%;
+    max-width: 80%;
     // extra right padding reserves room for the chevron so it isn't obscured
     padding: 6px 28px 6px 8px;
     background-color: var(--vscode-input-background);
@@ -92,6 +91,9 @@
     background-repeat: no-repeat;
     background-position: right 8px center;
     background-size: 12px;
+    option {
+      max-width: calc(100% - 28px);
+    }
   }
 }
 
