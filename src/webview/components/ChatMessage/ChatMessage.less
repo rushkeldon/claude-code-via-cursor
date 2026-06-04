@@ -1,0 +1,414 @@
+.message {
+  margin-bottom: 10px;
+  padding: 4px 6px 6px 6px;
+  border-radius: 4px;
+
+  &.user {
+    border: 1px solid rgba(64, 165, 255, 0.2);
+    border-radius: 8px;
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-editor-font-family);
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, #40a5ff 0%, #0078d4 100%);
+    }
+  }
+
+  &.claude {
+    border: 1px solid rgba(46, 204, 113, 0.1);
+    border-radius: 8px;
+    color: var(--vscode-editor-foreground);
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: #bc815f;
+    }
+  }
+
+  &.error {
+    border: 1px solid rgba(231, 76, 60, 0.3);
+    border-radius: 8px;
+    color: var(--vscode-editor-foreground);
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, #e74c3c 0%, #c0392b 100%);
+    }
+  }
+
+  &.system {
+    background-color: var(--vscode-panel-background);
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+  }
+
+  &.tool {
+    border: 1px solid rgba(120, 139, 237, 0.12);
+    border-radius: 8px;
+    color: var(--vscode-editor-foreground);
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, #7c8bed 0%, #5d6fe1 100%);
+    }
+
+    // When a result card follows this tool call, pull them together so the
+    // result reads as attached to the call. The result is .tool-result-message
+    // (ToolResultMessage renders its own root, not a ChatMessage). Guarded by
+    // :has so a tool call with no result keeps the normal 10px rhythm.
+    &:has(+ .tool-result-message) {
+      margin-bottom: 2px;
+    }
+  }
+
+  &.tool-result {
+    border: 1px solid rgba(28, 192, 140, 0.2);
+    border-radius: 8px;
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-editor-font-family);
+    white-space: pre-wrap;
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, #1cc08c 0%, #16a974 100%);
+    }
+  }
+
+  &.thinking {
+    border: 1px solid rgba(186, 85, 211, 0.2);
+    border-radius: 8px;
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-editor-font-family);
+    font-style: italic;
+    opacity: 0.9;
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, #ba55d3 0%, #9932cc 100%);
+    }
+  }
+
+  &:hover .copy-btn {
+    opacity: 0.7;
+  }
+
+  &:hover .user-copy-btn {
+    opacity: 0.7;
+  }
+}
+
+.user-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+
+  &:hover {
+    opacity: 1;
+    background-color: var(--vscode-list-hoverBackground);
+  }
+}
+
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
+}
+
+.copy-btn {
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    opacity: 1;
+    background-color: var(--vscode-list-hoverBackground);
+  }
+}
+
+.message-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: white;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-left: 6px;
+
+  &.user {
+    background: linear-gradient(135deg, #40a5ff 0%, #0078d4 100%);
+  }
+
+  &.claude {
+    font-size: 17px;
+    line-height: 10px;
+    font-weight: bolder;
+    background: #bc815f;
+  }
+
+  &.system {
+    background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+  }
+
+  &.error {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  }
+}
+
+.message-label {
+  font-weight: 500;
+  font-size: 12px;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.message-content {
+  padding-left: 6px;
+
+  p {
+    margin: 0px;
+    padding: 0px;
+    margin-block-start: 4px;
+    margin-block-end: 4px;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    margin: 2px 0px;
+    padding: 0;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+  }
+  h1 {
+    font-size: 1.3em;
+  }
+  h2 {
+    font-size: 1.15em;
+  }
+  h3 {
+    font-size: 1.05em;
+  }
+  h4 {
+    font-size: 1em;
+  }
+
+  ul,
+  ol {
+    margin: 0;
+    margin-block-start: 0;
+    margin-block-end: 0;
+    padding: 0 0 0 20px;
+    padding-block-start: 0;
+    padding-block-end: 0;
+  }
+  li {
+    margin: 0;
+    padding: 0;
+  }
+
+  code {
+    background: var(
+      --vscode-textCodeBlock-background,
+      rgba(127, 127, 127, 0.12)
+    );
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.9em;
+    font-family: var(--vscode-editor-font-family);
+  }
+
+  .code-block-container {
+    margin: 8px 0;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--vscode-panel-border);
+  }
+
+  .code-block-header {
+    padding: 4px 10px;
+    background: rgba(127, 127, 127, 0.1);
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+  }
+
+  .code-block {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.2));
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: var(--vscode-editor-font-family);
+
+    code {
+      background: none;
+      padding: 0;
+      border-radius: 0;
+    }
+  }
+
+  .code-line {
+    white-space: pre;
+  }
+
+  strong {
+    font-weight: 600;
+  }
+  em {
+    font-style: italic;
+  }
+
+  pre {
+    padding: 10px 12px;
+    background: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.2));
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: var(--vscode-editor-font-family);
+
+    code {
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      font-size: inherit;
+    }
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+
+  th,
+  td {
+    border: 1px solid var(--vscode-panel-border);
+    padding: 6px 10px;
+    text-align: left;
+  }
+
+  th {
+    background: rgba(127, 127, 127, 0.1);
+    font-weight: 600;
+  }
+
+  blockquote {
+    margin: 8px 0;
+    padding: 4px 12px;
+    border-left: 3px solid
+      var(--vscode-textBlockQuote-border, var(--vscode-panel-border));
+    color: var(--vscode-descriptionForeground);
+  }
+
+  a {
+    color: var(--vscode-textLink-foreground);
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding-left: 6px;
+}
+
+.message-image-wrap {
+  display: inline-block;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--vscode-panel-border);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: var(--vscode-focusBorder);
+  }
+}
+
+.message-image-thumbnail {
+  display: block;
+  width: 250px;
+  height: auto;
+}

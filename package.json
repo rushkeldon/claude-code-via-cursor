@@ -1,0 +1,273 @@
+{
+  "name": "claude-code-via-cursor",
+  "displayName": "Claude Code via Cursor",
+  "description": "Personal fork of Claude Code Chat with the OpenCredits integration removed. Routes only to your local Claude Code.",
+  "version": "3.0.0-appcloud9.57",
+  "publisher": "appcloud9",
+  "author": "Keldon Rush (appcloud9.com)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rushkeldon/claude-code-via-cursor"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": [
+    "Other",
+    "AI",
+    "Chat",
+    "Machine Learning",
+    "Snippets",
+    "Programming Languages",
+    "Education",
+    "Testing",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "claude code",
+    "code explanation",
+    "code generation",
+    "code summary",
+    "code transform",
+    "vibe coding",
+    "prompt language",
+    "copilot",
+    "claude",
+    "ai",
+    "assistant",
+    "chatbot",
+    "chat",
+    "anthropic",
+    "code",
+    "programming",
+    "development",
+    "productivity"
+  ],
+  "icon": "icon.png",
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "claude-code-via-cursor.openChat",
+        "title": "Open Claude Code via Cursor",
+        "category": "Claude Code via Cursor",
+        "icon": "icon-bubble.png"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claude-code-via-cursor.openChat",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "claude-code-via-cursor.openChat"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "claude-code-via-cursor.openChat",
+          "group": "claude@1",
+          "when": "editorTextFocus"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "claude-code-via-cursor.openChat",
+          "group": "navigation@1",
+          "when": "true"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "claude-code-via-cursor.openChat",
+          "group": "claude@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "claude-code-via-cursor.openChat",
+          "group": "claude@1"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "claude-code-via-cursor.openChat",
+          "group": "navigation@1",
+          "when": "true"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "claude-code-via-cursor.openChat",
+          "group": "navigation@1",
+          "when": "view == workbench.explorer.fileView"
+        }
+      ],
+      "touchBar": [
+        {
+          "command": "claude-code-via-cursor.openChat",
+          "group": "editing",
+          "when": "true"
+        }
+      ],
+      "menuBar/file": [
+        {
+          "command": "claude-code-via-cursor.openChat",
+          "group": "1_new@1"
+        }
+      ]
+    },
+    "views": {
+      "claude-code-via-cursor": [
+        {
+          "id": "claude-code-via-cursor.chat",
+          "type": "webview",
+          "name": "Claude Code via Cursor",
+          "when": "true",
+          "icon": "icon-bubble.png",
+          "contextualTitle": "Claude Code via Cursor",
+          "dropMimeTypes": [
+            "text/uri-list"
+          ]
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claude-code-via-cursor",
+          "title": "Claude Code via Cursor",
+          "icon": "icon-bubble.png"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Claude Code via Cursor",
+      "properties": {
+        "claudeCodeChat.wsl.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable WSL integration for running Claude"
+        },
+        "claudeCodeChat.wsl.distro": {
+          "type": "string",
+          "default": "Ubuntu",
+          "description": "WSL distribution name (e.g., Ubuntu, Debian)"
+        },
+        "claudeCodeChat.wsl.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to Node.js in the WSL distribution. Only needed if Claude was installed via npm. Recent Claude installs ship as a native executable and don't require Node."
+        },
+        "claudeCodeChat.wsl.claudePath": {
+          "type": "string",
+          "default": "/usr/local/bin/claude",
+          "description": "Path to Claude executable in the WSL distribution"
+        },
+        "claudeCodeChat.thinking.intensity": {
+          "type": "string",
+          "enum": [
+            "think",
+            "think-hard",
+            "think-harder",
+            "ultrathink"
+          ],
+          "default": "think",
+          "description": "Thinking mode intensity level. Higher levels provide more detailed reasoning but consume more tokens."
+        },
+        "claudeCodeChat.permissions.yoloMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Yolo Mode to skip all permission checks. Use with caution as Claude can execute any command without asking."
+        },
+        "claudeCodeChat.executable.path": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to the Claude Code executable. Leave empty to use the default 'claude' command."
+        },
+        "claudeCodeChat.environment.variables": {
+          "type": "object",
+          "default": {},
+          "description": "Custom environment variables to pass to Claude Code. Example: {\"ANTHROPIC_API_KEY\": \"sk-...\"}"
+        },
+        "claudeCodeChat.environment.disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, custom environment variables are not passed to Claude Code."
+        },
+        "claudeCodeChat.terminal.useIntegrated": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use Cursor's integrated terminal for slash commands. Uncheck to use an external terminal."
+        },
+        "claudeCodeChat.terminal.externalApp": {
+          "type": "string",
+          "default": "",
+          "description": "External terminal application name (e.g., iTerm2, Windows Terminal, kitty)."
+        },
+        "claudeCodeChat.terminal.customTemplate": {
+          "type": "string",
+          "default": "",
+          "description": "Custom terminal launch template. Use {{command}} as placeholder for the command to run."
+        },
+        "claudeCodeChat.terminal.borderColor": {
+          "type": "string",
+          "default": "#00ff41",
+          "description": "Border color for the prompt in terminal mode."
+        },
+        "claudeCodeChat.terminal.fontColor": {
+          "type": "string",
+          "default": "#00ff41",
+          "description": "Font color for the prompt in terminal mode."
+        },
+        "claudeCodeChat.firstRun.hasShown": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the first-run experience has been shown. Uncheck to see it again on next launch."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./ && vite build",
+    "dev:webview": "vite build --watch",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "test:downloader": "npm run compile && mocha --ui tdd \"out/test/downloader*.test.js\" --reporter spec --timeout 360000",
+    "test:downloader:unit": "npm run compile && mocha --ui tdd out/test/downloader.test.js --reporter spec"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.5",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.94.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.5.0",
+    "eslint": "^9.25.1",
+    "less": "^4.6.4",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.16"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.9.1",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.4",
+    "marked-highlight": "^2.2.4",
+    "preact": "^10.29.2"
+  }
+}

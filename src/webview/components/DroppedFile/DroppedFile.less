@@ -1,0 +1,85 @@
+.dropped-files-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+}
+
+.dropped-file {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 11px;
+}
+
+.dropped-file-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(127, 127, 127, 0.06);
+  cursor: pointer;
+}
+
+.dropped-file-chevron {
+  font-size: 10px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.dropped-file-path {
+  font-family: var(--vscode-editor-font-family);
+  font-weight: 500;
+  color: var(--vscode-foreground);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropped-file-meta {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+}
+
+.dropped-file-remove {
+  background: none;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  line-height: 1;
+
+  &:hover {
+    color: var(--vscode-errorForeground);
+  }
+}
+
+.dropped-file-code {
+  max-height: 52px;
+  overflow: hidden;
+  cursor: pointer;
+
+  &--expanded {
+    max-height: 200px;
+    overflow-y: auto;
+    cursor: default;
+  }
+
+  pre {
+    margin: 0;
+    padding: 4px 8px;
+    background: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.15));
+    font-size: 11px;
+    line-height: 1.4;
+    font-family: var(--vscode-editor-font-family);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  code {
+    color: var(--vscode-descriptionForeground);
+  }
+}

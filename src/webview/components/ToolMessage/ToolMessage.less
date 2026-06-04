@@ -1,0 +1,72 @@
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tool-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, #7c8bed 0%, #5d6fe1 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: white;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.tool-info {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--vscode-editor-foreground);
+  opacity: 0.9;
+  flex: 1;
+}
+
+.tool-copy-btn {
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    opacity: 1;
+    background-color: var(--vscode-list-hoverBackground);
+  }
+}
+
+.tool-header:hover .tool-copy-btn {
+  opacity: 0.7;
+}
+
+.tool-body {
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+}
+
+.tool-file-link {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: underline;
+
+  &:hover {
+    color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+  }
+}

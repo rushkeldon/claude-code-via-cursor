@@ -1,0 +1,30 @@
+.header {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background-color: var(--vscode-panel-background);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 35px;
+  padding: 0px;
+  margin: 0px;
+  &-left {
+    display: flex;
+    align-items: center;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--vscode-foreground);
+    letter-spacing: -0.3px;
+    line-height: 35px;
+  }
+
+  @media (max-width: 385px) {
+    h2 {
+      display: none;
+    }
+  }
+}

@@ -1,0 +1,84 @@
+.first-run-content {
+  font-size: 12px;
+}
+
+.first-run-intro {
+  color: var(--vscode-foreground);
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+}
+
+.first-run-skills {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.first-run-skill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.first-run-skill-name {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  min-width: 80px;
+}
+
+.first-run-skill-desc {
+  flex: 1;
+  color: var(--vscode-descriptionForeground);
+}
+
+.first-run-skill-check {
+  color: var(--vscode-charts-green, #4ec9b0);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.first-run-skill-pending {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.first-run-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.first-run-btn {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  font-size: 12px;
+
+  &:hover {
+    background: var(--vscode-list-hoverBackground);
+  }
+
+  &.primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background);
+
+    &:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+  }
+}
+
+.first-run-hint {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  margin: 0;
+}

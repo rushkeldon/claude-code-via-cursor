@@ -1,0 +1,74 @@
+// Easing: standard "decelerate" curve — starts moving immediately, settles
+// gently into the closed state. Avoids the rubbery feel of ease-in-out at
+// long durations.
+@thinking-collapse-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+@thinking-collapse-duration: 750ms;
+@thinking-collapse-delay: 2s;
+
+.thinking-live {
+  margin: 8px 0 4px 0;
+  padding: 10px 12px 10px 14px;
+  border-left: 2px solid
+    var(--vscode-textBlockQuote-border, var(--vscode-panel-border));
+  background: var(
+    --vscode-textBlockQuote-background,
+    rgba(127, 127, 127, 0.05)
+  );
+  border-radius: 0 6px 6px 0;
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+  font-size: 12.5px;
+  line-height: 1.5;
+  opacity: 0.9;
+  height: auto;
+  overflow-y: auto;
+  will-change: height;
+  transition: height @thinking-collapse-duration @thinking-collapse-ease
+    @thinking-collapse-delay;
+
+  &.thinking-live--collapsing {
+    height: 0 !important;
+    border-color: transparent;
+    overflow: hidden;
+    .thinking-header::before {
+      animation-play-state: paused;
+    }
+  }
+
+  .thinking-header {
+    font-style: normal;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.8;
+    margin-bottom: 6px;
+
+    &::before {
+      content: "●";
+      margin-right: 6px;
+      color: var(--vscode-charts-orange, #ff9500);
+      animation: thinkingPulse 1.4s ease-in-out infinite;
+    }
+  }
+
+  .thinking-content {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .thinking-chunk-sep {
+    height: 8px;
+  }
+}
+
+@keyframes thinkingPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}

@@ -1,0 +1,92 @@
+.auth-error-card {
+  margin: 12px 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #c62828);
+  border-radius: 8px;
+  background: var(--vscode-inputValidation-errorBackground, rgba(198, 40, 40, 0.08));
+  color: var(--vscode-foreground);
+}
+
+.auth-error-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.auth-error-icon { font-size: 16px; }
+.auth-error-title { color: var(--vscode-errorForeground, #f48771); }
+
+.auth-error-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 10px;
+
+  code {
+    background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.12));
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11.5px;
+  }
+}
+
+.auth-error-detail {
+  font-size: 11.5px;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 10px;
+
+  summary {
+    cursor: pointer;
+    opacity: 0.75;
+  }
+
+  pre {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.08));
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+}
+
+.auth-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.auth-error-btn {
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  font-size: 11.5px;
+
+  &:hover {
+    border-color: var(--vscode-focusBorder);
+  }
+
+  &-primary {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: transparent;
+
+    &:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+  }
+
+  &-ghost {
+    background: transparent;
+    opacity: 0.7;
+  }
+}
