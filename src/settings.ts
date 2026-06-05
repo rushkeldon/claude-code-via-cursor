@@ -26,6 +26,16 @@ export function getSelectedModel(): string {
 	return selectedModel;
 }
 
+// Record the selected model without the env-var / settings-file dance. Used by
+// the in-band set_model path (Phase 2): the live process already switched via
+// the control protocol, so we only need to persist the choice for the status
+// bar and the next spawn. Does NOT touch env vars or settings.local.json.
+export function recordSelectedModel(model: string): void {
+	selectedModel = model;
+	deps?.workspaceState.update('claude.selectedModel', model);
+	log.debug('Settings', 'recordSelectedModel', { model }, '📝');
+}
+
 const MODEL_TIER_MAP: Record<string, string> = {
 	'default': 'opus',
 	'opus': 'opus',
@@ -38,6 +48,78 @@ export function getDisplayModel(): string {
 		return MODEL_TIER_MAP[selectedModel]!;
 	}
 	return selectedModel;
+}
+
+// Path to the project-level CLI settings the extension manages: <workspace>/.claude/settings.local.json.
+// This is the file the Claude CLI reads first in its settings hierarchy, so writing
+// the `model` key here lets us steer the model without passing --model (which would
+// override the user's globally-pinned model). Returns undefined with no workspace open.
+function getLocalSettingsPath(): string | undefined {
+	const folder = vscode.workspace.workspaceFolders?.[0];
+	if (!folder) return undefined;
+	return path.join(folder.uri.fsPath, '.claude', 'settings.local.json');
+}
+
+function readLocalSettings(): Record<string, any> {
+	const p = getLocalSettingsPath();
+	if (!p) return {};
+	try {
+		return JSON.parse(fs.readFileSync(p, 'utf8'));
+	} catch {
+		return {};
+	}
+}
+
+// Returns the `model` configured in the project's settings.local.json, or undefined
+// if unset / no workspace. This is the source of truth for what the CLI will use.
+export function getLocalModel(): string | undefined {
+	const json = readLocalSettings();
+	return typeof json.model === 'string' && json.model.trim() ? json.model : undefined;
+}
+
+// Writes (or clears, when given an empty string) the `model` key in the project's
+// settings.local.json, preserving all other keys and creating the file/dir if needed.
+export async function setLocalModel(model: string): Promise<void> {
+	log.debug('Settings', 'enter setLocalModel', { model }, '➡️');
+	const p = getLocalSettingsPath();
+	if (!p) {
+		log.warn('Settings', 'no workspace folder, cannot write settings.local.json', undefined, '🚫');
+		vscode.window.showWarningMessage('Open a workspace folder to configure the model.');
+		return;
+	}
+	try {
+		const json = readLocalSettings();
+		const trimmed = model.trim();
+		if (trimmed) {
+			json.model = trimmed;
+		} else {
+			delete json.model;
+		}
+		fs.mkdirSync(path.dirname(p), { recursive: true });
+		fs.writeFileSync(p, JSON.stringify(json, null, 2) + '\n', 'utf8');
+		log.debug('Settings', 'wrote model to settings.local.json', { model: trimmed }, '💾');
+		sendModelConfig();
+	} catch (error: any) {
+		log.error('Settings', 'setLocalModel failed', { error: error?.message ?? String(error) }, '💥');
+		vscode.window.showErrorMessage(`Failed to write model setting: ${error?.message || 'Unknown error'}`);
+	}
+}
+
+// Sends the currently-configured model (from settings.local.json) plus the global
+// default (from ~/.claude/settings.json) to the webview so the status bar and the
+// settings UI can display the real configured model and pre-fill the first-run prompt.
+export function sendModelConfig(): void {
+	const local = getLocalModel();
+	const global = getFullModelString();
+	deps?.postMessage({
+		type: 'modelConfig',
+		data: {
+			model: local,
+			globalDefault: global.configured,
+			needsFirstRun: !local,
+		},
+	});
+	log.debug('Settings', 'sent modelConfig', { local, globalDefault: global.configured }, '📤');
 }
 
 // Reads ~/.claude/settings.json for the full provider-qualified model string.

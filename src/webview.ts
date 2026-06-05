@@ -13,6 +13,7 @@ import * as conversation from "./conversation";
 import * as permissions from "./permissions";
 import * as skillsAndPlugins from "./skillsAndPlugins";
 import * as subprocess from "./subprocess";
+import * as sessionLock from "./sessionLock";
 
 type PostMessageFn = (message: any) => void;
 
@@ -398,6 +399,7 @@ function sendReadyMessage(): void {
   });
 
   sendModelFull();
+  settings.sendModelConfig();
 
   sendPlatformInfo();
   settings.sendCurrentSettings();
@@ -449,6 +451,9 @@ async function handleWebviewMessage(message: any): Promise<void> {
       return;
     case "getConversationList":
       conversation.sendConversationList();
+      // Also surface which sessions are locked by another live window so the
+      // History list can badge them and offer Fork instead of resume.
+      postMessage({ type: "lockedSessions", data: { sessionIds: sessionLock.lockedSessionIds() } });
       return;
     case "deleteConversation":
       await conversation.deleteConversation(message.filename);
@@ -507,7 +512,18 @@ async function handleWebviewMessage(message: any): Promise<void> {
       await loadConversation(message.filename);
       return;
     case "stopRequest":
+    case "stop":
+      // Graceful stop: interrupt the turn, keep the process warm.
       subprocess.stopProcess();
+      return;
+    case "skull":
+      // Hard kill: terminate the process group and park to history.
+      await subprocess.skullProcess();
+      return;
+    case "forkSession":
+      // Fork a (possibly locked) session into a new terminal session this
+      // window owns — the escape hatch for a session active in another window.
+      forkSessionToTerminal(message.sessionId ?? conversation.getCurrentSessionId());
       return;
     case "openFile":
       try {
@@ -543,6 +559,22 @@ async function handleWebviewMessage(message: any): Promise<void> {
       return;
     case "selectModel":
       await settings.setSelectedModel(message.model, message.tierModels);
+      return;
+    case "setModel":
+      await settings.setLocalModel(message.model);
+      return;
+    case "setModelInband":
+      // Runtime model switch via the control protocol (no settings-file dance).
+      // Falls back to recording-only if no process is live yet.
+      await subprocess.setModel(message.model);
+      return;
+    case "getModelConfig":
+      settings.sendModelConfig();
+      return;
+    case "getModelList":
+      // Replay the dynamic model list captured at the initialize handshake.
+      // (Empty until the first spawn completes its handshake.)
+      subprocess.postModelList();
       return;
     case "openModelTerminal":
       terminalCommands.openModelTerminal(
@@ -1117,6 +1149,34 @@ function fetchCommandList(): void {
   });
 }
 
+// Fork an explicit session id into a new terminal session (the History "Fork"
+// affordance for a session locked by another window). Uses --fork-session so the
+// original transcript is untouched and the fork gets a brand-new id this window
+// owns. No idle gate here: the forked session is a different process entirely,
+// and the locked session is owned by another window anyway.
+function forkSessionToTerminal(sessionId: string | undefined): void {
+  if (!sessionId) {
+    vscode.window.showWarningMessage("No session to fork.");
+    return;
+  }
+  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const yoloMode = config.get<boolean>("permissions.yoloMode", false);
+  const yoloFlag = yoloMode ? "--dangerously-skip-permissions" : "";
+  const forkModel = settings.getLocalModel() || settings.getFullModelString().configured;
+
+  const args = ["--resume", sessionId, "--fork-session"];
+  if (forkModel) args.push("--model", forkModel);
+  if (yoloFlag) args.push(yoloFlag);
+
+  const terminal = vscode.window.createTerminal({
+    name: `Claude fork`,
+    location: { viewColumn: vscode.ViewColumn.One },
+    ...terminalCommands.buildClaudeTerminalOptions(args),
+  });
+  terminal.show();
+  log.info("Webview", "forked session to terminal", { sessionId, forkModel }, "🍴");
+}
+
 async function launchSlashCommand(
   command: string,
   forceExternal?: boolean,
@@ -1131,6 +1191,20 @@ async function launchSlashCommand(
   }
 
   const sessionId = conversation.getCurrentSessionId();
+
+  // Breakout = FORK. `--resume <id> --fork-session` copies the transcript so far
+  // into a NEW session id, leaving the extension's session untouched — so the
+  // extension stays the sole writer of its own transcript (plain --resume/
+  // --continue would attach a second writer and interleave-corrupt the file).
+  // Gate on idle: the on-disk transcript the fork copies must be complete, so we
+  // refuse to fork while a turn is in flight.
+  if (sessionId && subprocess.isActive()) {
+    vscode.window.showWarningMessage(
+      "Can't open a terminal fork while Claude is working — wait for the current turn to finish.",
+    );
+    return;
+  }
+
   const fullCommand = command.trim()
     ? command.startsWith("/")
       ? command
@@ -1139,14 +1213,27 @@ async function launchSlashCommand(
   const config = vscode.workspace.getConfiguration("claudeCodeChat");
   const useIntegrated = config.get<boolean>("terminal.useIntegrated", true);
 
+  // Carry the extension's current YOLO mode into the breakaway terminal session
+  // so the forked session picks up the same permission posture as the in-process
+  // subprocess (which adds the same flag in subprocess.ts when yoloMode is set).
+  const yoloMode = config.get<boolean>("permissions.yoloMode", false);
+  const yoloFlag = yoloMode ? "--dangerously-skip-permissions" : "";
+
+  // --model parity: launch the forked terminal on the same model the extension
+  // is using, so the forked world matches. settings.local.json / global default
+  // already steer a plain `claude`, but pass it explicitly for the fork.
+  const forkModel = settings.getLocalModel() || settings.getFullModelString().configured;
+
   if (useIntegrated) {
     const args: string[] = [];
     if (fullCommand) args.push(fullCommand);
     if (sessionId) {
-      args.push("--continue");
+      args.push("--resume", sessionId, "--fork-session");
+      if (forkModel) args.push("--model", forkModel);
     }
+    if (yoloFlag) args.push(yoloFlag);
     const terminal = vscode.window.createTerminal({
-      name: `Claude ${fullCommand}`,
+      name: `Claude fork ${fullCommand}`.trim(),
       location: { viewColumn: vscode.ViewColumn.One },
       ...terminalCommands.buildClaudeTerminalOptions(args),
     });
@@ -1154,28 +1241,38 @@ async function launchSlashCommand(
   } else {
     const externalApp = config.get<string>("terminal.externalApp", "");
     const customTemplate = config.get<string>("terminal.customTemplate", "");
-    const claudeCmd = sessionId
-      ? `claude --resume ${sessionId} "${fullCommand}"`
-      : `claude "${fullCommand}"`;
+    const workspaceCwd =
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const yoloArg = yoloFlag ? ` ${yoloFlag}` : "";
+    // Only append the positional prompt when there actually is one. An empty
+    // breakout (the "open in external terminal" button) must launch a plain
+    // interactive session — passing an empty "" makes the CLI treat it as a
+    // one-shot print prompt and exit immediately instead of starting a session.
+    const forkArg = sessionId ? ` --resume ${sessionId} --fork-session` : "";
+    const modelArg = sessionId && forkModel ? ` --model ${forkModel}` : "";
+    const promptArg = fullCommand ? ` "${fullCommand}"` : "";
+    const claudeCmd = `claude${yoloArg}${forkArg}${modelArg}${promptArg}`;
 
     let launchCmd = "";
     if (customTemplate) {
       launchCmd = customTemplate.replace(/\{\{command\}\}/g, claudeCmd);
     } else if (externalApp) {
-      launchCmd = getTerminalLaunchCommand(externalApp, claudeCmd);
+      launchCmd = getTerminalLaunchCommand(externalApp, claudeCmd, workspaceCwd);
     } else {
+      const forkArgs = sessionId
+        ? [fullCommand, "--resume", sessionId, "--fork-session", ...(forkModel ? ["--model", forkModel] : [])]
+        : [fullCommand];
       const terminal = vscode.window.createTerminal({
-        name: `Claude ${fullCommand}`,
+        name: `Claude fork ${fullCommand}`.trim(),
         location: { viewColumn: vscode.ViewColumn.One },
-        ...terminalCommands.buildClaudeTerminalOptions(
-          sessionId ? [fullCommand, "--resume", sessionId] : [fullCommand],
-        ),
+        ...terminalCommands.buildClaudeTerminalOptions(forkArgs),
       });
       terminal.show();
       return;
     }
 
     if (launchCmd) {
+      log.debug("Webview", "external launchCmd", { launchCmd }, "🚀");
       cp.exec(launchCmd, (error) => {
         if (error) {
           log.error(
@@ -1293,13 +1390,64 @@ function checkSkillsInstalled(): void {
 function getTerminalLaunchCommand(
   terminalApp: string,
   command: string,
+  cwd?: string,
 ): string {
   const platform = process.platform;
-  const escaped = command.replace(/"/g, '\\"');
+  // Prepend a cd into the workspace directory so the external terminal starts
+  // Claude in the right place (the internal subprocess path passes cwd to spawn,
+  // but external terminals inherit VS Code's cwd otherwise). Single-quote the
+  // path so it survives the later double-quote escaping for AppleScript/bash -c.
+  // The cd command itself is embedded inside an outer `osascript -e '…'` (also
+  // single-quoted), so any literal single quote — including the ones we add
+  // around the path — must be escaped with the POSIX '\'' idiom or the outer
+  // shell parse swallows them, stripping the protective quoting and breaking
+  // paths that contain spaces or shell metacharacters.
+  // Windows is handled separately below since cmd uses a different cd syntax.
+  const quotedCwd = cwd ? `'${cwd.replace(/'/g, `'\\''`)}'` : "";
+  const posixWithCd = cwd ? `cd ${quotedCwd} && ${command}` : command;
+  const escaped = posixWithCd.replace(/"/g, '\\"');
 
   if (platform === "darwin") {
     if (terminalApp.includes("iTerm")) {
-      return `osascript -e 'tell application "iTerm2" to tell current window to create tab with default profile command "${escaped}"'`;
+      // iTerm's scripting application is named "iTerm" (bundle id com.googlecode.iterm2),
+      // NOT "iTerm2" — telling "iTerm2" raises -1728. Two further traps, both hit the
+      // hard way and verified by reproduction:
+      //
+      //   1. `create window ... profile` + `write text "<cmd>"` only TYPES the command —
+      //      it races the new session's login-shell init (nvm/setNodeVer, etc.) and the
+      //      text usually lands at the prompt unsubmitted. `create window ... command`
+      //      runs the program directly (no typing, no race).
+      //   2. The `command` value otherwise threads FOUR quoting layers: cp.exec's
+      //      `/bin/sh -c` → `osascript -e '…'` → AppleScript `"…"` → inner shell. The
+      //      workspace path's own single quotes terminate the outer `-e '…'` early and
+      //      silently corrupt the command (the bug that left the session at ~).
+      //
+      // We sidestep ALL of it by writing the cd+claude line to a temp script and pointing
+      // iTerm at `/bin/bash <path>`. The AppleScript string then contains only a
+      // space-free temp path — nothing for any layer to corrupt — and the command runs
+      // for real. `exec $SHELL -l` keeps the session interactive after claude exits.
+      const scriptPath = path.join(
+        os.tmpdir(),
+        `claude-iterm-launch-${process.pid}-${Date.now()}.sh`,
+      );
+      try {
+        fs.writeFileSync(scriptPath, `#!/bin/bash\n${posixWithCd}\nexec $SHELL -l\n`, {
+          mode: 0o755,
+        });
+      } catch (e: any) {
+        log.error(
+          "Webview",
+          "failed to write iTerm launch script",
+          { error: e?.message ?? String(e), scriptPath },
+          "💥",
+        );
+      }
+      return [
+        `osascript`,
+        `-e 'tell application "iTerm"'`,
+        `-e 'create window with default profile command "/bin/bash ${scriptPath}"'`,
+        `-e 'end tell'`,
+      ].join(" ");
     }
     if (terminalApp.includes("kitty")) return `kitty -- bash -c "${escaped}"`;
     if (terminalApp.includes("Ghostty"))
@@ -1309,11 +1457,17 @@ function getTerminalLaunchCommand(
   }
 
   if (platform === "win32") {
+    // Windows Terminal sets the directory via -d; others need a `cd /d` prefix.
+    const winDir = cwd ? `"${cwd}"` : ".";
+    const winEscaped = command.replace(/"/g, '\\"');
+    const winCdPrefix = cwd ? `cd /d "${cwd}" && ` : "";
     if (terminalApp.includes("Windows Terminal") || terminalApp.includes("wt"))
-      return `wt -d . cmd /c "${escaped}"`;
-    if (terminalApp.includes("PowerShell") || terminalApp.includes("pwsh"))
-      return `powershell -Command "${escaped}"`;
-    return `start cmd /c "${escaped}"`;
+      return `wt -d ${winDir} cmd /c "${winEscaped}"`;
+    if (terminalApp.includes("PowerShell") || terminalApp.includes("pwsh")) {
+      const psPrefix = cwd ? `Set-Location -LiteralPath '${cwd}'; ` : "";
+      return `powershell -Command "${psPrefix}${winEscaped}"`;
+    }
+    return `start cmd /c "${winCdPrefix}${winEscaped}"`;
   }
 
   if (terminalApp.includes("kitty")) return `kitty -- bash -c "${escaped}"`;

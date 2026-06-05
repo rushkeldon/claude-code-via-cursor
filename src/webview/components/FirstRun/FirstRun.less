@@ -47,6 +47,31 @@
   flex-shrink: 0;
 }
 
+.first-run-model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.08);
+  margin-bottom: 16px;
+}
+
+.first-run-model-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  color: var(--vscode-input-foreground);
+  font-size: 12px;
+  outline: none;
+
+  &:focus {
+    border-color: var(--vscode-focusBorder);
+  }
+}
+
 .first-run-actions {
   display: flex;
   gap: 8px;

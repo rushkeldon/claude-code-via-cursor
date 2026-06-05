@@ -1,7 +1,9 @@
 import "./FirstRun.less";
 import { signal } from "@preact/signals";
+import { useState } from "preact/hooks";
 import { on, post } from "../../vscode";
 import { Modal } from "../Modal/Modal";
+import { modelConfig } from "../../state/settings";
 
 const firstRunVisible = signal(false);
 const skillsData = signal<{
@@ -15,6 +17,9 @@ on("firstRunPrompt" as any, (msg: any) => {
     plan2cursorInstalled: false,
   };
   firstRunVisible.value = true;
+  // Fetch the model config so the first-run model prompt knows whether a model
+  // is already configured and what global default to pre-fill.
+  post({ type: "getModelConfig" });
   // Acknowledge that the modal actually rendered. The host latches the
   // "shown" flags on this ack — never on the fire-and-forget prompt — so a
   // dropped or never-rendered prompt can't permanently suppress first-run.
@@ -28,6 +33,40 @@ function installSkills() {
 
 function dismiss() {
   firstRunVisible.value = false;
+}
+
+function ModelSetup() {
+  const cfg = modelConfig.value;
+  // Only prompt for a model when none is configured for this workspace yet.
+  // Pre-fill from the user's global ~/.claude default so existing users just confirm.
+  const [value, setValue] = useState<string | null>(null);
+  if (!cfg || !cfg.needsFirstRun) return null;
+
+  const current = value ?? cfg.globalDefault ?? "";
+
+  function save() {
+    const trimmed = current.trim();
+    if (trimmed) post({ type: "setModel", model: trimmed });
+  }
+
+  return (
+    <div class="first-run-model">
+      <span class="first-run-skill-name">Model</span>
+      <span class="first-run-skill-desc">
+        Pick the model this workspace should use. It's written to{" "}
+        <code>.claude/settings.local.json</code>; leave the pre-filled global
+        default to keep what you use elsewhere.
+      </span>
+      <input
+        type="text"
+        class="first-run-model-input"
+        value={current}
+        placeholder={cfg.globalDefault || "claude-opus-4-8"}
+        onInput={(e) => setValue((e.target as HTMLInputElement).value)}
+        onBlur={save}
+      />
+    </div>
+  );
 }
 
 export function FirstRun() {
@@ -84,6 +123,8 @@ export function FirstRun() {
             )}
           </div>
         </div>
+
+        <ModelSetup />
 
         <div class="first-run-actions">
           {(!data?.modesInstalled || !data?.plan2cursorInstalled) && (

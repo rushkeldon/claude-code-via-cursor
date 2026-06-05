@@ -59,6 +59,23 @@ export async function handleControlRequest(controlRequest: any): Promise<void> {
 		return;
 	}
 
+	// YOLO mode is enforced here, not via the CLI's --dangerously-skip-permissions
+	// flag (which would suppress the control-request channel AskUserQuestion needs).
+	// Auto-approve every other tool so the user gets frictionless behaviour while
+	// interactive prompts (like AskUserQuestion above) still reach the webview.
+	const yoloMode = vscode.workspace.getConfiguration('claudeCodeChat').get<boolean>('permissions.yoloMode', false);
+	if (yoloMode) {
+		log.debug('Permissions', 'yolo mode — auto-allowing tool', { toolName, requestId }, '🚀');
+		sendPermissionResponse(requestId, true, {
+			requestId,
+			toolName,
+			input,
+			suggestions,
+			toolUseId
+		}, false);
+		return;
+	}
+
 	const isPreApproved = await isToolPreApproved(toolName, input);
 
 	if (isPreApproved) {

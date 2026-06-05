@@ -158,6 +158,16 @@ export async function saveCurrentConversation(): Promise<void> {
 	}
 }
 
+// Park the active session to history: force a final save (guaranteeing an index
+// entry) and refresh the conversation list so the History panel shows it as a
+// resumable entry. Used by Skull (hard kill) and extension deactivate. Saving
+// already happens per-message, so this is the belt-and-suspenders final flush.
+export async function parkToHistory(): Promise<void> {
+	log.info('Conversation', 'parkToHistory', { sessionId: currentSessionId, messages: currentConversation.length }, '🅿️');
+	await saveCurrentConversation();
+	sendConversationList();
+}
+
 export async function initializeConversations(storagePath: string | undefined): Promise<void> {
 	log.debug('Conversation', 'enter initializeConversations', { storagePath }, '➡️');
 	try {

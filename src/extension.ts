@@ -9,6 +9,7 @@ import * as conversation from './conversation';
 import * as permissions from './permissions';
 import * as skillsAndPlugins from './skillsAndPlugins';
 import * as subprocess from './subprocess';
+import * as sessionLock from './sessionLock';
 import * as webview from './webview';
 
 class DiffContentProvider implements vscode.TextDocumentContentProvider {
@@ -74,6 +75,10 @@ export function activate(context: vscode.ExtensionContext) {
 		getGlobalState: () => context.globalState
 	});
 
+	// Cross-window single-writer lock (per session id). Uses the global storage
+	// path so the lock is shared across windows of the same workspace.
+	sessionLock.init(context.globalStorageUri.fsPath);
+
 	const latestConversation = conversation.getLatestConversation();
 	conversation.setCurrentSessionId(latestConversation?.sessionId);
 
@@ -108,16 +113,36 @@ export function activate(context: vscode.ExtensionContext) {
 	statusBarItem.command = 'claude-code-via-cursor.openChat';
 	statusBarItem.show();
 
-	// Profile watcher
+	// Profile + settings watcher. Pushes the identity profile to the UI AND
+	// requests a graceful subprocess restart at the next idle boundary so a
+	// profile/provider swap (env block in settings.json) takes effect — model-
+	// within-provider is handled in-band by set_model, but provider/account/
+	// region are read at process startup and need a respawn.
 	const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
-	const push = () => profile.readAndPushProfile();
-	push();
+	const onSettingsChange = () => {
+		profile.readAndPushProfile();
+		subprocess.requestSettingsRestart();
+	};
+	profile.readAndPushProfile();
 	const profileWatcher = vscode.workspace.createFileSystemWatcher(
 		new vscode.RelativePattern(vscode.Uri.file(path.dirname(settingsPath)), 'settings.json')
 	);
-	profileWatcher.onDidChange(push);
-	profileWatcher.onDidCreate(push);
-	profileWatcher.onDidDelete(push);
+	profileWatcher.onDidChange(onSettingsChange);
+	profileWatcher.onDidCreate(onSettingsChange);
+	profileWatcher.onDidDelete(onSettingsChange);
+
+	// Also watch the project-level CLI settings the extension manages, since the
+	// model / env there also affects the next spawn.
+	let localSettingsWatcher: vscode.FileSystemWatcher | undefined;
+	const wsFolder = vscode.workspace.workspaceFolders?.[0];
+	if (wsFolder) {
+		localSettingsWatcher = vscode.workspace.createFileSystemWatcher(
+			new vscode.RelativePattern(wsFolder, '.claude/settings.local.json')
+		);
+		localSettingsWatcher.onDidChange(() => subprocess.requestSettingsRestart());
+		localSettingsWatcher.onDidCreate(() => subprocess.requestSettingsRestart());
+		localSettingsWatcher.onDidDelete(() => subprocess.requestSettingsRestart());
+	}
 
 	// Register URI handler for deep links (reserved for future use)
 	const uriHandler = vscode.window.registerUriHandler({
@@ -126,10 +151,20 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(disposable, loadConversationDisposable, configChangeDisposable, statusBarItem, uriHandler, profileWatcher);
+	if (localSettingsWatcher) { context.subscriptions.push(localSettingsWatcher); }
 }
 
 export function deactivate() {
 	log.info('Extension', 'deactivate', undefined, '🛑');
+	try {
+		// Park the active session to history (parity with Skull) before tearing
+		// down the process, so a reload/close leaves a resumable index entry.
+		// Best-effort: deactivate can't reliably await, but saving also happens
+		// per-message, so this is the final flush.
+		void conversation.parkToHistory();
+	} catch (e: any) {
+		log.error('Extension', 'parkToHistory on deactivate failed', { error: e?.message ?? String(e) }, '💥');
+	}
 	try {
 		webview.forceShutdown();
 	} catch (e: any) {

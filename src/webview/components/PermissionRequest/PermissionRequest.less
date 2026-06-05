@@ -1,0 +1,125 @@
+.permission-request {
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 149, 0, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 149, 0, 0.05);
+  position: relative;
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(180deg, #ff9500 0%, #d97706 100%);
+  }
+
+  &.decided {
+    opacity: 0.7;
+  }
+}
+
+.permission-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.permission-icon {
+  font-size: 16px;
+}
+
+.permission-content {
+  padding-left: 6px;
+}
+
+.permission-prompt {
+  font-size: 13px;
+  margin: 0 0 8px;
+  color: var(--vscode-foreground);
+}
+
+.permission-detail {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.permission-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+
+  .btn {
+    padding: 5px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--vscode-button-border, transparent);
+    font-size: 12px;
+    cursor: pointer;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+
+    &:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+
+    &.allow,
+    &.primary {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+
+      &:hover {
+        background: var(--vscode-button-hoverBackground);
+      }
+    }
+
+    &.deny {
+      background: transparent;
+      border-color: var(--vscode-inputValidation-errorBorder, rgba(255, 80, 80, 0.5));
+      color: var(--vscode-errorForeground, #f48771);
+
+      &:hover {
+        background: rgba(255, 80, 80, 0.1);
+      }
+    }
+  }
+}
+
+.permission-decision {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+
+  &.allowed {
+    background: rgba(46, 204, 113, 0.08);
+    border: 1px solid rgba(46, 204, 113, 0.2);
+  }
+
+  &.denied {
+    background: rgba(255, 80, 80, 0.08);
+    border: 1px solid rgba(255, 80, 80, 0.2);
+  }
+
+  &.expired {
+    background: rgba(255, 149, 0, 0.08);
+    border: 1px solid rgba(255, 149, 0, 0.2);
+    color: var(--vscode-descriptionForeground);
+  }
+}

@@ -7,6 +7,7 @@ import {
   fullSettings,
   permissionsData,
   detectedTerminals,
+  modelConfig,
 } from "../../state/settings";
 
 export const settingsModalVisible = signal(false);
@@ -356,6 +357,62 @@ function CustomizeSection() {
   );
 }
 
+function ModelSection() {
+  const cfg = modelConfig.value;
+  if (!cfg) {
+    post({ type: "getModelConfig" });
+  }
+  // Seed the input with the configured model, falling back to the global
+  // default (so the field is pre-filled for users who have a ~/.claude model).
+  const [value, setValue] = useState<string | null>(null);
+  const current = value ?? cfg?.model ?? cfg?.globalDefault ?? "";
+
+  function save() {
+    post({ type: "setModel", model: current.trim() });
+  }
+
+  return (
+    <div class="settings-section">
+      <h3 class="settings-section-title">Model</h3>
+      <p class="settings-hint">
+        The model ID written to <code>.claude/settings.local.json</code>. The
+        Claude CLI reads this directly — enter any model ID it accepts (e.g.{" "}
+        <code>us.anthropic.claude-opus-4-8[1m]</code>,{" "}
+        <code>claude-sonnet-4-6</code>).
+      </p>
+      <div class="settings-group">
+        <div class="settings-field">
+          <label>Model ID</label>
+          <input
+            type="text"
+            value={current}
+            placeholder={cfg?.globalDefault || "claude-opus-4-8"}
+            onInput={(e) => setValue((e.target as HTMLInputElement).value)}
+            onBlur={save}
+          />
+          {cfg && !cfg.model && (
+            <p class="settings-field-hint">
+              No model configured for this workspace yet — the CLI is using its
+              global default
+              {cfg.globalDefault ? (
+                <>
+                  {" "}(<code>{cfg.globalDefault}</code>)
+                </>
+              ) : null}
+              . Set one here to pin it.
+            </p>
+          )}
+          {cfg?.model && (
+            <p class="settings-field-hint">
+              Currently configured: <code>{cfg.model}</code>
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const skillsStatus = signal<{
   modesInstalled: boolean;
   plan2cursorInstalled: boolean;
@@ -548,6 +605,7 @@ export function SettingsModal() {
     >
       {fullSettings.value ? (
         <div class="settings-modal-content">
+          <ModelSection />
           <WSLSection />
           <TerminalSection />
           <PermissionsSection />

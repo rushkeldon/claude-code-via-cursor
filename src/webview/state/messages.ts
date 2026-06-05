@@ -14,15 +14,24 @@ export interface QuestionData {
   answers?: Record<string, string>;
 }
 
+export interface PermissionData {
+  id: string;
+  tool: string;
+  input: Record<string, any>;
+  pattern?: string;
+  status: 'approved' | 'denied' | 'expired' | 'cancelled';
+}
+
 export type NoticeVariant = 'warning' | 'info' | 'success';
 
 export interface ChatMsg {
-  role: 'user' | 'assistant' | 'system' | 'error' | 'thinking' | 'question' | 'notice' | 'tool' | 'tool-result';
+  role: 'user' | 'assistant' | 'system' | 'error' | 'thinking' | 'question' | 'permission' | 'notice' | 'tool' | 'tool-result';
   content: string;
   images?: Array<{ filePath: string; previewUri: string }>;
   elapsedLabel?: string;
   timestamp?: number;
   questionData?: QuestionData;
+  permissionData?: PermissionData;
   noticeVariant?: NoticeVariant;
   noticeTitle?: string;
   toolName?: string;
@@ -126,6 +135,9 @@ on('loadConversation' as any, (msg: any) => {
       }
       case 'askUserQuestion':
         items.push({ role: 'question', content: '', questionData: data, timestamp: Date.now() });
+        break;
+      case 'permissionRequest':
+        items.push({ role: 'permission', content: '', permissionData: data, timestamp: Date.now() });
         break;
       default:
         break;

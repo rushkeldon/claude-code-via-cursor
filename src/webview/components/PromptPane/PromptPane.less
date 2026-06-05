@@ -279,6 +279,12 @@
   }
 }
 
+.stop-skull-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .stop-inline-btn {
   background-color: #ef4444;
   color: #fff;
@@ -298,6 +304,27 @@
 
   &:hover {
     background-color: #dc2626;
+  }
+}
+
+.skull-inline-btn {
+  background: none;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  opacity: 0.75;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+    background-color: rgba(239, 68, 68, 0.18);
+    border-color: #ef4444;
   }
 }
 

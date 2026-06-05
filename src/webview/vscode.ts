@@ -15,6 +15,16 @@ export type MessageToExtension =
   | { type: 'getPermissions' }
   | { type: 'addPermission'; toolName: string; command: string | null }
   | { type: 'removePermission'; toolName: string; command: string | null }
+  | { type: 'permissionResponse'; id: string; approved: boolean; alwaysAllow?: boolean }
+  | { type: 'askUserQuestionResponse'; id: string; answers: Record<string, string> }
+  | { type: 'setModel'; model: string }
+  | { type: 'setModelInband'; model: string }
+  | { type: 'getModelConfig' }
+  | { type: 'getModelList' }
+  | { type: 'stop' }
+  | { type: 'skull' }
+  | { type: 'resumeSession'; sessionId?: string }
+  | { type: 'forkSession'; sessionId?: string }
 
 export type MessageFromExtension =
   | { type: 'ready'; data: string }
@@ -34,11 +44,21 @@ export type MessageFromExtension =
   | { type: 'stallHintClear' }
   | { type: 'modelSwitching'; data: { model: string } }
   | { type: 'modelFull'; data: { configured?: string; resolvedEnv?: string } }
+  | { type: 'modelConfig'; data: { model?: string; globalDefault?: string; needsFirstRun: boolean } }
+  | { type: 'modelList'; data: { models: Array<{ value: string; displayName?: string; description?: string }>; selected?: string } }
+  | { type: 'modelSet'; data: { model: string; ok: boolean; error?: string } }
+  | { type: 'sessionParked'; data: { sessionId?: string } }
+  | { type: 'sessionLocked'; data: { sessionId?: string; lockedBy?: number } }
+  | { type: 'lockedSessions'; data: { sessionIds: string[] } }
   | { type: 'detectedTerminals'; data: { terminals: string[]; platform: string } }
   | { type: 'updateTokens'; data: any }
   | { type: 'updateTotals'; data: any }
   | { type: 'settingsData'; data: any }
   | { type: 'permissionsData'; data: any }
+  | { type: 'permissionRequest'; data: { id: string; tool: string; input: Record<string, any>; pattern?: string; suggestions?: any[]; decisionReason?: any; blockedPath?: any; status: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled' } }
+  | { type: 'updatePermissionStatus'; data: { id: string; status: 'approved' | 'denied' | 'expired' | 'cancelled' } }
+  | { type: 'askUserQuestion'; data: { id: string; questions: any[]; status: string; answers?: Record<string, string> } }
+  | { type: 'updateAskUserQuestionStatus'; data: { id: string; status: string; answers: Record<string, string> | null } }
 
 export function post(msg: MessageToExtension): void {
   vscode.postMessage(msg);

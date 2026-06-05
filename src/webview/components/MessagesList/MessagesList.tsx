@@ -11,6 +11,7 @@ import { ToolResultMessage } from '../ToolResultMessage/ToolResultMessage';
 import { ThinkingPill } from '../ThinkingPill/ThinkingPill';
 import { ActiveThinkingPane, thinkingText, thinkingActive } from '../ThinkingPane/ThinkingPane';
 import { PendingAskUserQuestions, InlineQuestionCard } from '../AskUserQuestion/AskUserQuestion';
+import { PendingPermissions, InlinePermissionCard } from '../PermissionRequest/PermissionRequest';
 
 function renderMessage(msg: ChatMsg & { elapsedLabel?: string }, index: number) {
   switch (msg.role) {
@@ -26,6 +27,8 @@ function renderMessage(msg: ChatMsg & { elapsedLabel?: string }, index: number) 
       return <ThinkingPill key={index} content={msg.content} elapsedLabel={msg.elapsedLabel || '?'} />;
     case 'question' as any:
       return msg.questionData ? <InlineQuestionCard key={index} questionData={msg.questionData} /> : null;
+    case 'permission' as any:
+      return msg.permissionData ? <InlinePermissionCard key={index} permissionData={msg.permissionData} /> : null;
     case 'notice' as any:
       return (
         <NoticeCard
@@ -85,6 +88,7 @@ export function MessagesList() {
   return (
     <div class="messages" ref={containerRef} onScroll={handleScroll}>
       {messages.value.map((msg, i) => renderMessage(msg as any, i))}
+      <PendingPermissions />
       <PendingAskUserQuestions />
       <ActiveThinkingPane />
     </div>

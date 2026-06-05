@@ -16,9 +16,15 @@ interface ConversationItem {
 }
 
 const conversations = signal<ConversationItem[]>([]);
+// Session ids currently locked by another live window (badge + Fork, no resume).
+const lockedSessionIds = signal<string[]>([]);
 
 on('conversationList' as any, (msg: any) => {
   conversations.value = msg.data || [];
+});
+
+on('lockedSessions' as any, (msg: any) => {
+  lockedSessionIds.value = Array.isArray(msg.data?.sessionIds) ? msg.data.sessionIds : [];
 });
 
 function formatTime(iso: string): string {
@@ -42,8 +48,16 @@ function formatTime(iso: string): string {
 }
 
 export function ConversationHistory() {
-  function loadConversation(filename: string) {
+  function loadConversation(filename: string, locked: boolean) {
+    if (locked) return; // locked rows aren't directly resumable — use Fork
     post({ type: 'loadConversation', filename } as any);
+    historyVisible.value = false;
+  }
+
+  function forkConversation(e: Event, sessionId: string) {
+    e.stopPropagation();
+    // Fork the locked session into a new one this window owns (terminal).
+    post({ type: 'forkSession', sessionId } as any);
     historyVisible.value = false;
   }
 
@@ -52,6 +66,8 @@ export function ConversationHistory() {
     post({ type: 'deleteConversation', filename } as any);
     conversations.value = conversations.value.filter(c => c.filename !== filename);
   }
+
+  const locked = new Set(lockedSessionIds.value);
 
   return (
     <Modal
@@ -63,28 +79,47 @@ export function ConversationHistory() {
         {conversations.value.length === 0 ? (
           <p class="conversation-empty">No saved conversations.</p>
         ) : (
-          conversations.value.map((conv) => (
-            <div
-              class="conversation-item"
-              key={conv.filename}
-              onClick={() => loadConversation(conv.filename)}
-            >
-              <div class="conversation-item-content">
-                <span class="conversation-item-label">{conv.firstUserMessage || 'Untitled'}</span>
-                <span class="conversation-item-meta">
-                  {conv.messageCount} messages • {formatTime(conv.startTime)}
-                </span>
-              </div>
-              <button
-                class="conversation-item-delete"
-                type="button"
-                title="Delete conversation"
-                onClick={(e) => deleteConversation(e, conv.filename)}
+          conversations.value.map((conv) => {
+            const isLocked = locked.has(conv.sessionId);
+            return (
+              <div
+                class={`conversation-item${isLocked ? ' locked' : ''}`}
+                key={conv.filename}
+                onClick={() => loadConversation(conv.filename, isLocked)}
+                title={isLocked ? 'Active in another window — fork to work on a copy here' : undefined}
               >
-                ✕
-              </button>
-            </div>
-          ))
+                <div class="conversation-item-content">
+                  <span class="conversation-item-label">
+                    {isLocked && <span class="conversation-item-lock" title="Active in another window">🔒</span>}
+                    {conv.firstUserMessage || 'Untitled'}
+                  </span>
+                  <span class="conversation-item-meta">
+                    {conv.messageCount} messages • {formatTime(conv.startTime)}
+                    {isLocked && ' • active elsewhere'}
+                  </span>
+                </div>
+                {isLocked ? (
+                  <button
+                    class="conversation-item-fork"
+                    type="button"
+                    title="Fork this session into a new terminal session"
+                    onClick={(e) => forkConversation(e, conv.sessionId)}
+                  >
+                    Fork
+                  </button>
+                ) : (
+                  <button
+                    class="conversation-item-delete"
+                    type="button"
+                    title="Delete conversation"
+                    onClick={(e) => deleteConversation(e, conv.filename)}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </Modal>

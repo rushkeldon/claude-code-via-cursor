@@ -68,7 +68,13 @@ export function PromptPane() {
   }
 
   function stopRequest() {
+    // Graceful stop: interrupt the turn, keep the process warm.
     post({ type: 'stopRequest' } as any);
+  }
+
+  function skullRequest() {
+    // Hard kill: terminate the process group + park to history.
+    post({ type: 'skull' } as any);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -449,12 +455,17 @@ export function PromptPane() {
                   </div>
                 </button>
               ) : (
-                <button class="stop-inline-btn" type="button" onClick={stopRequest}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M6 6h12v12H6z"/>
-                  </svg>
-                  Stop
-                </button>
+                <div class="stop-skull-group">
+                  <button class="stop-inline-btn" type="button" onClick={stopRequest} title="Interrupt this turn, keep the session warm">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 6h12v12H6z"/>
+                    </svg>
+                    Stop
+                  </button>
+                  <button class="skull-inline-btn" type="button" onClick={skullRequest} title="Hard-kill the process (and subagents) and park the session to History">
+                    💀
+                  </button>
+                </div>
               )}
             </div>
           </div>
