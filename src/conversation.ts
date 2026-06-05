@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
-import * as os from 'os';
 import * as tokenCounters from './tokenCounters';
 import { log } from './logger';
+import { deleteSessionImages } from './sessionImages';
 
 type PostMessageFn = (message: any) => void;
 
@@ -19,6 +18,12 @@ interface ConversationData {
 	};
 	messages: Array<{ timestamp: string; messageType: string; data: any }>;
 	filename?: string;
+	// Model-generated session title (see sessionTitle.ts). `title` is the
+	// descriptive label shown in the History list (falls back to firstUserMessage
+	// when absent). `titleLocked` becomes true once the final (6-turn) title is
+	// issued, so a resumed session never re-fires title generation.
+	title?: string;
+	titleLocked?: boolean;
 }
 
 interface ConversationDeps {
@@ -40,7 +45,15 @@ let conversationIndex: Array<{
 	totalCost: number;
 	firstUserMessage: string;
 	lastUserMessage: string;
+	title?: string;
+	titleLocked?: boolean;
 }> = [];
+
+// Model-generated title for the in-flight conversation. Persisted into each
+// saved ConversationData and its index entry. `currentTitleLocked` guards
+// against re-firing the final (6-turn) generation on a resumed session.
+let currentTitle: string | undefined;
+let currentTitleLocked = false;
 
 export function init(d: ConversationDeps): void {
 	log.info('Conversation', 'init', { hasPostMessage: !!d.postMessage }, '🔧');
@@ -72,6 +85,10 @@ export function getConversationsPath(): string | undefined {
 
 export function getLatestConversation(): any | undefined {
 	return conversationIndex.length > 0 ? conversationIndex[0] : undefined;
+}
+
+export function getConversationIndex(): typeof conversationIndex {
+	return conversationIndex;
 }
 
 export function sendConversationList(): void {
@@ -113,7 +130,17 @@ export function sendAndSaveMessage(message: { type: string; data: any; images?: 
 	log.debug('Conversation', 'sendAndSaveMessage', { messageIndex, type: message.type }, '💾');
 }
 
-export async function saveCurrentConversation(): Promise<void> {
+// Serializes saves so two overlapping writes (e.g. a per-message save and a
+// title-triggered save) can never interleave and truncate the file. Each call
+// chains onto the previous one's completion.
+let saveChain: Promise<void> = Promise.resolve();
+
+export function saveCurrentConversation(): Promise<void> {
+	saveChain = saveChain.then(() => doSaveCurrentConversation()).catch(() => { /* logged inside */ });
+	return saveChain;
+}
+
+async function doSaveCurrentConversation(): Promise<void> {
 	if (!conversationsPath || currentConversation.length === 0) { return; }
 	if (!currentSessionId) { return; }
 
@@ -144,12 +171,21 @@ export async function saveCurrentConversation(): Promise<void> {
 				output: saveTotals.totalTokensOutput
 			},
 			messages: currentConversation,
-			filename
+			filename,
+			title: currentTitle,
+			titleLocked: currentTitleLocked
 		};
 
 		const filePath = path.join(conversationsPath, filename);
 		const content = new TextEncoder().encode(JSON.stringify(conversationData, null, 2));
-		await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), content);
+
+		// Atomic write: write to a temp file, then rename over the target. A rename
+		// is atomic on the same filesystem, so a reader never sees a half-written
+		// (0-byte / truncated) file even if the process dies mid-write.
+		const tmpPath = `${filePath}.tmp`;
+		const tmpUri = vscode.Uri.file(tmpPath);
+		await vscode.workspace.fs.writeFile(tmpUri, content);
+		await vscode.workspace.fs.rename(tmpUri, vscode.Uri.file(filePath), { overwrite: true });
 
 		updateConversationIndex(filename, conversationData);
 
@@ -216,10 +252,12 @@ export async function loadConversationData(filename: string): Promise<Conversati
 	}
 }
 
-export function setConversationState(messages: Array<{ timestamp: string; messageType: string; data: any }>, startTime: string | undefined): void {
-	log.debug('Conversation', 'setConversationState', { messageCount: messages.length, startTime }, '🔄');
+export function setConversationState(messages: Array<{ timestamp: string; messageType: string; data: any }>, startTime: string | undefined, title?: string, titleLocked?: boolean): void {
+	log.debug('Conversation', 'setConversationState', { messageCount: messages.length, startTime, hasTitle: !!title, titleLocked: !!titleLocked }, '🔄');
 	currentConversation = messages;
 	conversationStartTime = startTime;
+	currentTitle = title;
+	currentTitleLocked = !!titleLocked;
 }
 
 export function newSession(): void {
@@ -227,6 +265,34 @@ export function newSession(): void {
 	currentSessionId = undefined;
 	currentConversation = [];
 	conversationStartTime = undefined;
+	currentTitle = undefined;
+	currentTitleLocked = false;
+}
+
+// ── Session title state ─────────────────────────────────────────────────────
+// Driven by subprocess.onTurnEnd's 3-then-6 schedule (see sessionTitle.ts).
+
+export function getCurrentTitle(): string | undefined {
+	return currentTitle;
+}
+
+export function isTitleLocked(): boolean {
+	return currentTitleLocked;
+}
+
+// Count of user turns so far (userInput messages) — the unit the title schedule
+// keys off. NOT currentConversation.length (which counts every stream event).
+export function getUserTurnCount(): number {
+	return currentConversation.filter(m => m.messageType === 'userInput').length;
+}
+
+// Store a generated title. `locked` marks the final (6-turn) title so it never
+// regenerates. Persists immediately and refreshes the History list.
+export function setSessionTitle(title: string, locked: boolean): void {
+	log.info('Conversation', 'setSessionTitle', { title, locked }, '🏷️');
+	currentTitle = title;
+	if (locked) { currentTitleLocked = true; }
+	void saveCurrentConversation().then(() => sendConversationList());
 }
 
 export async function deleteConversation(filename: string): Promise<void> {
@@ -237,14 +303,19 @@ export async function deleteConversation(filename: string): Promise<void> {
 		const filePath = path.join(conversationsPath, filename);
 		const fileUri = vscode.Uri.file(filePath);
 
-		// Load conversation to find image paths before deleting
+		// Resolve the conversation's session id (from the file, falling back to the
+		// index entry if the JSON is missing/unreadable) and delete its images by
+		// the <sessionId>_ filename prefix before removing the conversation.
+		const indexEntry = conversationIndex.find(entry => entry.filename === filename);
+		let sessionId: string | undefined = indexEntry?.sessionId;
 		try {
 			const content = await vscode.workspace.fs.readFile(fileUri);
 			const data = JSON.parse(new TextDecoder().decode(content));
-			cleanupConversationImages(data.messages || []);
+			sessionId = data.sessionId || sessionId;
 		} catch {
-			// File may not exist or be unreadable — proceed with index cleanup
+			// File may not exist or be unreadable — fall back to the index entry's id.
 		}
+		cleanupConversationImages(sessionId);
 
 		// Delete the conversation file
 		try {
@@ -263,32 +334,11 @@ export async function deleteConversation(filename: string): Promise<void> {
 	}
 }
 
-function cleanupConversationImages(messages: Array<{ messageType: string; data: any }>): void {
-	const imgDir = path.join(os.homedir(), 'Library', 'Application Support', 'claude-code-via-cursor', 'img');
-
-	for (const msg of messages) {
-		if (msg.messageType === 'userInput' && msg.data) {
-			// Images can be in the message data directly or in an images array
-			const images: Array<{ filePath?: string }> = [];
-			if (Array.isArray(msg.data.images)) {
-				images.push(...msg.data.images);
-			}
-			if (typeof msg.data === 'object' && msg.data.images) {
-				images.push(...msg.data.images);
-			}
-
-			for (const img of images) {
-				if (img.filePath && img.filePath.startsWith(imgDir)) {
-					try {
-						fs.unlinkSync(img.filePath);
-						log.debug('Conversation', 'deleted image', { path: img.filePath }, '🧹');
-					} catch {
-						// File already gone
-					}
-				}
-			}
-		}
-	}
+// Delete a conversation's images by session-id filename prefix (img/<sessionId>_*).
+// Images are associated with their conversation solely by this prefix — no longer by
+// parsing msg.data.images (which was never persisted, so the old walk matched nothing).
+function cleanupConversationImages(sessionId: string | undefined): void {
+	deleteSessionImages(sessionId);
 }
 
 function cleanSessionTitle(raw: string): string {
@@ -333,15 +383,17 @@ function updateConversationIndex(filename: string, conversationData: Conversatio
 		messageCount: conversationData.messageCount,
 		totalCost: conversationData.totalCost,
 		firstUserMessage: firstUserMessage.substring(0, 100),
-		lastUserMessage: lastUserMessage.substring(0, 100)
+		lastUserMessage: lastUserMessage.substring(0, 100),
+		title: conversationData.title,
+		titleLocked: conversationData.titleLocked
 	};
 
 	conversationIndex = conversationIndex.filter(entry => entry.filename !== conversationData.filename);
 	conversationIndex.unshift(indexEntry);
 
-	if (conversationIndex.length > 50) {
-		conversationIndex = conversationIndex.slice(0, 50);
-		log.debug('Conversation', 'pruned conversation index to 50', undefined, '🧹');
+	if (conversationIndex.length > 100) {
+		conversationIndex = conversationIndex.slice(0, 100);
+		log.debug('Conversation', 'pruned conversation index to 100', undefined, '🧹');
 	}
 
 	deps?.workspaceState.update('claude.conversationIndex', conversationIndex);

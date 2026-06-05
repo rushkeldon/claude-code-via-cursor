@@ -1,8 +1,8 @@
-import './AskUserQuestion.less';
-import { signal } from '@preact/signals';
-import { useState } from 'preact/hooks';
-import { on, post } from '../../vscode';
-import { messages, QuestionData } from '../../state/messages';
+import "./AskUserQuestion.less";
+import { signal } from "@preact/signals";
+import { useState } from "preact/hooks";
+import { on, post } from "../../vscode";
+import { messages, QuestionData } from "../../state/messages";
 
 interface Question {
   header?: string;
@@ -14,7 +14,7 @@ interface Question {
 interface AskUserQuestionData {
   id: string;
   questions: Question[];
-  status: 'pending' | 'answered' | 'expired' | 'cancelled';
+  status: "pending" | "answered" | "expired" | "cancelled";
   answers?: Record<string, string>;
 }
 
@@ -24,51 +24,58 @@ function commitToMessages(data: AskUserQuestionData) {
   const questionData: QuestionData = {
     id: data.id,
     questions: data.questions,
-    status: data.status as 'answered' | 'expired' | 'cancelled',
+    status: data.status as "answered" | "expired" | "cancelled",
     answers: data.answers,
   };
-  messages.value = [...messages.value, {
-    role: 'question',
-    content: '',
-    questionData,
-    timestamp: Date.now(),
-  }];
+  messages.value = [
+    ...messages.value,
+    {
+      role: "question",
+      content: "",
+      questionData,
+      timestamp: Date.now(),
+    },
+  ];
 }
 
-on('askUserQuestion' as any, (msg: any) => {
+on("askUserQuestion" as any, (msg: any) => {
   const data = msg.data as AskUserQuestionData;
-  if (data.status === 'pending') {
+  if (data.status === "pending") {
     pendingQuestions.value = [...pendingQuestions.value, data];
   } else {
     commitToMessages(data);
   }
 });
 
-on('updateAskUserQuestionStatus' as any, (msg: any) => {
+on("updateAskUserQuestionStatus" as any, (msg: any) => {
   const { id, status, answers } = msg.data;
-  if (status !== 'pending') {
-    const q = pendingQuestions.value.find(q => q.id === id);
+  if (status !== "pending") {
+    const q = pendingQuestions.value.find((q) => q.id === id);
     if (q) {
-      pendingQuestions.value = pendingQuestions.value.filter(q => q.id !== id);
+      pendingQuestions.value = pendingQuestions.value.filter(
+        (q) => q.id !== id,
+      );
       commitToMessages({ ...q, status, answers });
     }
   }
 });
 
-on('ready', () => {
+on("ready", () => {
   pendingQuestions.value = [];
 });
 
-on('newSession' as any, () => {
+on("newSession" as any, () => {
   pendingQuestions.value = [];
 });
 
 function submitAnswers(requestId: string, answers: Record<string, string>) {
-  post({ type: 'askUserQuestionResponse', id: requestId, answers } as any);
-  const q = pendingQuestions.value.find(q => q.id === requestId);
+  post({ type: "askUserQuestionResponse", id: requestId, answers } as any);
+  const q = pendingQuestions.value.find((q) => q.id === requestId);
   if (q) {
-    pendingQuestions.value = pendingQuestions.value.filter(q => q.id !== requestId);
-    commitToMessages({ ...q, status: 'answered', answers });
+    pendingQuestions.value = pendingQuestions.value.filter(
+      (q) => q.id !== requestId,
+    );
+    commitToMessages({ ...q, status: "answered", answers });
   }
 }
 
@@ -78,22 +85,36 @@ interface QuestionCardProps {
 }
 
 export function QuestionCard({ data, isResolved }: QuestionCardProps) {
-  const resolved = isResolved ?? (data.status === 'answered' || data.status === 'expired' || data.status === 'cancelled');
+  const resolved =
+    isResolved ??
+    (data.status === "answered" ||
+      data.status === "expired" ||
+      data.status === "cancelled");
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [freeTexts, setFreeTexts] = useState<Record<number, string>>({});
 
-  function handleOptionChange(qIdx: number, label: string, multiSelect: boolean, checked: boolean) {
-    setSelections(prev => {
+  function handleOptionChange(
+    qIdx: number,
+    label: string,
+    multiSelect: boolean,
+    checked: boolean,
+  ) {
+    setSelections((prev) => {
       const current = prev[qIdx] || [];
       if (multiSelect) {
-        return { ...prev, [qIdx]: checked ? [...current, label] : current.filter(l => l !== label) };
+        return {
+          ...prev,
+          [qIdx]: checked
+            ? [...current, label]
+            : current.filter((l) => l !== label),
+        };
       }
       return { ...prev, [qIdx]: [label] };
     });
   }
 
   function handleFreeText(qIdx: number, value: string) {
-    setFreeTexts(prev => ({ ...prev, [qIdx]: value }));
+    setFreeTexts((prev) => ({ ...prev, [qIdx]: value }));
   }
 
   function handleSubmit() {
@@ -105,7 +126,7 @@ export function QuestionCard({ data, isResolved }: QuestionCardProps) {
       } else {
         const selected = selections[idx];
         if (selected && selected.length > 0) {
-          answers[q.question] = selected.join(', ');
+          answers[q.question] = selected.join(", ");
         }
       }
     });
@@ -113,10 +134,9 @@ export function QuestionCard({ data, isResolved }: QuestionCardProps) {
   }
 
   return (
-    <div class={`ask-user-question${resolved ? ' decided' : ''}`}>
+    <div class={`ask-user-question${resolved ? " decided" : ""}`}>
       <div class="ask-question-header">
-        <span class="ask-question-icon">❓</span>
-        <span>Claude has a question</span>
+        <span>CLAUDE Q & A</span>
       </div>
       <div class="ask-question-content">
         {data.questions.map((q, idx) => (
@@ -128,15 +148,26 @@ export function QuestionCard({ data, isResolved }: QuestionCardProps) {
                 {q.options.map((opt, optIdx) => (
                   <label class="question-option" key={optIdx}>
                     <input
-                      type={q.multiSelect ? 'checkbox' : 'radio'}
+                      type={q.multiSelect ? "checkbox" : "radio"}
                       name={`q-${data.id}-${idx}`}
                       value={opt.label}
                       disabled={resolved}
-                      onChange={(e) => handleOptionChange(idx, opt.label, !!q.multiSelect, (e.target as HTMLInputElement).checked)}
+                      onChange={(e) =>
+                        handleOptionChange(
+                          idx,
+                          opt.label,
+                          !!q.multiSelect,
+                          (e.target as HTMLInputElement).checked,
+                        )
+                      }
                     />
                     <div class="option-content">
                       <span class="option-label">{opt.label}</span>
-                      {opt.description && <span class="option-description">{opt.description}</span>}
+                      {opt.description && (
+                        <span class="option-description">
+                          {opt.description}
+                        </span>
+                      )}
                     </div>
                   </label>
                 ))}
@@ -148,7 +179,9 @@ export function QuestionCard({ data, isResolved }: QuestionCardProps) {
                   type="text"
                   class="question-freetext-input"
                   placeholder="Type your answer..."
-                  onInput={(e) => handleFreeText(idx, (e.target as HTMLInputElement).value)}
+                  onInput={(e) =>
+                    handleFreeText(idx, (e.target as HTMLInputElement).value)
+                  }
                 />
               </div>
             )}
@@ -156,17 +189,21 @@ export function QuestionCard({ data, isResolved }: QuestionCardProps) {
         ))}
         {!resolved && (
           <div class="ask-question-buttons">
-            <button class="btn primary" type="button" onClick={handleSubmit}>Submit</button>
+            <button class="btn primary" type="button" onClick={handleSubmit}>
+              Submit
+            </button>
           </div>
         )}
-        {data.status === 'answered' && data.answers && (
+        {data.status === "answered" && data.answers && (
           <div class="ask-question-decision">
             {Object.entries(data.answers).map(([q, a]) => (
-              <div key={q}><strong>{q}</strong>: {a}</div>
+              <div key={q}>
+                <strong>{q}</strong>: {a}
+              </div>
             ))}
           </div>
         )}
-        {(data.status === 'expired' || data.status === 'cancelled') && (
+        {(data.status === "expired" || data.status === "cancelled") && (
           <div class="ask-question-decision expired">This question expired</div>
         )}
       </div>
@@ -179,12 +216,18 @@ export function PendingAskUserQuestions() {
 
   return (
     <>
-      {pendingQuestions.value.map(q => <QuestionCard key={q.id} data={q} />)}
+      {pendingQuestions.value.map((q) => (
+        <QuestionCard key={q.id} data={q} />
+      ))}
     </>
   );
 }
 
-export function InlineQuestionCard({ questionData }: { questionData: QuestionData }) {
+export function InlineQuestionCard({
+  questionData,
+}: {
+  questionData: QuestionData;
+}) {
   const asData: AskUserQuestionData = {
     id: questionData.id,
     questions: questionData.questions,

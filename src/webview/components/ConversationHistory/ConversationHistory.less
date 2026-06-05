@@ -14,10 +14,15 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 6px 10px;
+  padding: 7px 10px;
   cursor: pointer;
   border: none;
-  background: none;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: transparent;
+
+  &:last-child {
+    border-bottom: none;
+  }
 
   &:hover {
     background: var(--vscode-list-hoverBackground);

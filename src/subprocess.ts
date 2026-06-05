@@ -10,6 +10,8 @@ import * as backupRepo from './backupRepo';
 import * as settings from './settings';
 import * as terminalCommands from './terminalCommands';
 import * as sessionLock from './sessionLock';
+import { TITLE_PROMPT, sanitizeTitle } from './sessionTitle';
+import { renamePendingImages, renameSessionImages } from './sessionImages';
 
 const exec = util.promisify(cp.exec);
 
@@ -38,12 +40,34 @@ let isProcessing: boolean | undefined;
 // respawn (with --resume) rather than a reuse.
 let spawnedPlanMode: boolean | undefined;
 // Turns that arrived while a turn was already in flight; flushed at turn end.
+// Each entry carries a stable `id` (monotonic counter) so the UI can target a
+// specific queued item for cancel without ambiguity.
 let queuedTurns: Array<{
+	id: string;
 	message: string;
 	planMode?: boolean;
 	thinkingMode?: boolean;
 	images?: Array<string | { filePath: string; previewUri?: string }>;
 }> = [];
+let queueSeq = 0;
+
+// Emit the current queue to the webview. Called at every queuedTurns mutation
+// (enqueue / drain / cancel / clear) so the peeking QueuedPrompt card stays in
+// sync. preview is the first ~80 chars; hasImages flags an attachment. Exported
+// so the webview can resync on (re)mount via webviewReady.
+export function emitQueueState(): void {
+	if (!deps) { return; }
+	deps.postMessage({
+		type: 'queueState',
+		data: {
+			items: queuedTurns.map(t => ({
+				id: t.id,
+				preview: (t.message || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+				hasImages: !!t.images?.length,
+			})),
+		},
+	});
+}
 
 // ── Per-process stdout/stderr + auth/stall state ──────────────────────────
 // These accumulate for the life of the warm process (reset on each spawn), not
@@ -105,6 +129,13 @@ export function init(d: SubprocessDeps): void {
 let silentQueryCallback: ((text: string) => void) | null = null;
 let userRequestedStop = false;
 
+// True from when a silent query is written to stdin until its `result` event
+// reaches onTurnEnd. The silentQueryCallback fires earlier (on the assistant
+// TEXT block), so it cannot be the signal that gates onTurnEnd — this flag is
+// cleared inside onTurnEnd's guard, on the result event, so a silent-query
+// completion is excluded from the queue-drain / deferred-switch logic.
+let awaitingSilentResult = false;
+
 export function isActive(): boolean {
 	return !!isProcessing;
 }
@@ -115,6 +146,10 @@ export function isSilentQueryInFlight(): boolean {
 
 export function clearSilentQuery(): void {
 	silentQueryCallback = null;
+	// Also clear the result-guard flag so a silent query abandoned mid-flight
+	// (process killed before its `result` arrived) can't wrongly guard the next
+	// real turn's onTurnEnd.
+	awaitingSilentResult = false;
 }
 
 let pendingSilentQuery: { message: string; callback: (response: string) => void } | null = null;
@@ -129,6 +164,7 @@ export function sendSilentQuery(message: string, callback: (response: string) =>
 		return;
 	}
 	silentQueryCallback = callback;
+	awaitingSilentResult = true;
 	const userMessage = {
 		type: 'user',
 		session_id: conversation.getCurrentSessionId() || '',
@@ -250,8 +286,9 @@ export async function sendMessage(message: string, planMode?: boolean, thinkingM
 
 	if (isProcessing) {
 		// A turn is already in flight — queue rather than spawn a second child.
-		queuedTurns.push({ message, planMode, thinkingMode, images });
+		queuedTurns.push({ id: `q-${++queueSeq}`, message, planMode, thinkingMode, images });
 		log.info('ClaudeProcess', 'turn queued (turn in flight)', { queueLen: queuedTurns.length }, '⏸️');
+		emitQueueState();
 		return;
 	}
 
@@ -578,11 +615,18 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		// future warm process (review bug #5).
 		pendingSettingsRestart = false;
 		pendingModelSwitch = undefined;
+		// Drop any in-flight silent query (e.g. title generation) so a dead
+		// process can't leave awaitingSilentResult stuck and wrongly guard the
+		// next warm process's first real turn.
+		silentQueryCallback = null;
+		pendingSilentQuery = null;
+		awaitingSilentResult = false;
 
 		if (authErrorFired) {
 			currentClaudeProcess = undefined;
 			spawnedPlanMode = undefined;
 			queuedTurns = [];
+			emitQueueState();
 			permissions.cancelPendingPermissionRequests();
 			deps!.postMessage({ type: 'clearLoading' });
 			isProcessing = false;
@@ -593,6 +637,7 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		currentClaudeProcess = undefined;
 		spawnedPlanMode = undefined;
 		queuedTurns = [];
+		emitQueueState();
 
 		permissions.cancelPendingPermissionRequests();
 
@@ -635,10 +680,14 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		sessionLock.release();
 		pendingSettingsRestart = false;
 		pendingModelSwitch = undefined;
+		silentQueryCallback = null;
+		pendingSilentQuery = null;
+		awaitingSilentResult = false;
 
 		currentClaudeProcess = undefined;
 		spawnedPlanMode = undefined;
 		queuedTurns = [];
+		emitQueueState();
 
 		permissions.cancelPendingPermissionRequests();
 
@@ -895,10 +944,30 @@ function disarmStallWatchdog(): void {
 // user turn (if any) against the still-warm process.
 function onTurnEnd(): void {
 	if (!deps) { return; }
+
+	// Guard: a silent-query completion (e.g. title generation) must NOT run the
+	// drain/deferral logic below — otherwise it would prematurely flush a queued
+	// user turn or apply a deferred set_model/settings restart. The flag is
+	// cleared HERE, on the result event (the silentQueryCallback already fired
+	// earlier, on the assistant text block), then we return without touching the
+	// queue or deferred switches. isProcessing was never set by sendSilentQuery,
+	// so there is no processing state to reconcile here.
+	if (awaitingSilentResult) {
+		awaitingSilentResult = false;
+		log.debug('Subprocess', 'onTurnEnd: silent-query result — guarded, skipping drain/deferral', undefined, '🤫');
+		return;
+	}
+
 	isProcessing = false;
 	disarmStallWatchdog();
 	deps.postMessage({ type: 'setProcessing', data: { isProcessing: false } });
 	flushPendingSilentQuery();
+
+	// Title generation (contract step 3): issue the 3-then-6 title query at this
+	// idle boundary. It goes out as a silent query whose own `result` is caught
+	// by the guard above, so it never drains the queue or applies a deferred
+	// switch.
+	maybeGenerateTitle();
 
 	// A model switch requested mid-turn applies now (before the next turn). Do
 	// this before a settings restart: if both are pending, the restart respawns
@@ -917,11 +986,53 @@ function onTurnEnd(): void {
 		void applySettingsRestart();
 	}
 
+	// Drain one queued turn (FIFO). This is the ONLY path that pulls from
+	// queuedTurns, so a Send-now interrupt (which leaves the queue intact and
+	// relies on this drain) can never double-execute the head.
 	if (queuedTurns.length > 0) {
 		const next = queuedTurns.shift()!;
 		log.info('ClaudeProcess', 'flushing queued turn', { remaining: queuedTurns.length }, '▶️');
+		emitQueueState();
 		void runTurn(next);
 	}
+}
+
+// ── Session title generation (3-then-6 schedule) ───────────────────────────
+// Issue a title silent-query at an idle turn boundary. Forward-only:
+//   • turns 3–5: provisional title, fired once (gated on "no title yet", which
+//     also survives reload since the restored title suppresses a re-fire);
+//   • turns >= 6: final title, then conversation.isTitleLocked() blocks any
+//     further regeneration forever.
+// Uses sendSilentQuery, so its result is caught by onTurnEnd's guard and never
+// drains the queue. An empty/garbage answer keeps the existing title.
+function maybeGenerateTitle(): void {
+	// A locked (final) title never regenerates.
+	if (conversation.isTitleLocked()) { return; }
+
+	const userTurns = conversation.getUserTurnCount();
+	if (userTurns < 3) { return; }
+
+	const isFinal = userTurns >= 6;
+
+	// Below turn 6, only generate a provisional if there isn't one yet — so it
+	// fires once across turns 3–5 (and not again after a resume that restored a
+	// provisional title). A failed/empty provisional leaves the title unset, so
+	// it will retry on the next boundary, which is fine.
+	if (!isFinal && conversation.getCurrentTitle()) { return; }
+
+	// Don't issue a second silent query while one is already outstanding (single
+	// callback slot). It gets another chance at the next turn boundary.
+	if (silentQueryCallback !== null) { return; }
+
+	log.info('Subprocess', 'maybeGenerateTitle', { userTurns, isFinal }, '🏷️');
+	sendSilentQuery(TITLE_PROMPT, (answer) => {
+		const title = sanitizeTitle(answer);
+		if (!title) {
+			log.debug('Subprocess', 'title answer empty/unusable — keeping existing', { answer }, '🏷️');
+			return;
+		}
+		conversation.setSessionTitle(title, isFinal);
+	});
 }
 
 // ── Settings/profile restart ──────────────────────────────────────────────
@@ -1001,7 +1112,16 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 
 		case 'system':
 			if (jsonData.subtype === 'init') {
+				const prevSessionId = conversation.getCurrentSessionId();
 				conversation.setCurrentSessionId(jsonData.session_id);
+				// Promote any images attached before an id existed (pending_*) to the
+				// freshly-minted id; and if this init reports a rotation on a warm
+				// process (prev id present and different), re-prefix that session's
+				// images. Forks never reach here for THIS window's id (out-of-process).
+				renamePendingImages(jsonData.session_id);
+				if (prevSessionId && prevSessionId !== jsonData.session_id) {
+					renameSessionImages(prevSessionId, jsonData.session_id);
+				}
 				// Acquire/rebind the cross-window lock to the id the CLI reports
 				// (covers brand-new sessions whose id is minted here, and any id
 				// rotation on a warm process).
@@ -1230,7 +1350,15 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 					// Adopt the latest reported session_id (authoritative for any
 					// later --resume / --fork-session). The process is NOT respawned
 					// per turn, so this keeps the stored id current if it ever rotates.
+					const prevSessionId = conversation.getCurrentSessionId();
 					conversation.setCurrentSessionId(jsonData.session_id);
+					// In-window id rotation: re-prefix this session's images so
+					// delete-by-prefix and the sweep stay accurate. A fork is
+					// out-of-process and never mutates this window's id, so it never
+					// triggers a rename here.
+					if (prevSessionId && prevSessionId !== jsonData.session_id) {
+						renameSessionImages(prevSessionId, jsonData.session_id);
+					}
 
 					conversation.sendAndSaveMessage({
 						type: 'sessionInfo',
@@ -1290,6 +1418,7 @@ function handleLoginRequired(): void {
 	// Login failure ends the turn; clear any queued turns since they would also
 	// fail, and disarm the watchdog.
 	queuedTurns = [];
+	emitQueueState();
 	disarmStallWatchdog();
 	isProcessing = false;
 
@@ -1399,6 +1528,7 @@ export async function stopProcess(): Promise<void> {
 	// Clear any queued turns so the interrupt doesn't immediately get followed by
 	// a queued send. (The user asked to stop.)
 	queuedTurns = [];
+	emitQueueState();
 
 	try {
 		await sendControlRequest('interrupt', {});
@@ -1427,6 +1557,93 @@ export async function stopProcess(): Promise<void> {
 	}
 }
 
+// SEND NOW (explicit interrupt + flush head): the card's ⬆ control. Interrupt
+// the in-flight turn via the warm interrupt (process stays alive) WITHOUT
+// clearing the queue, so the resulting `result` → onTurnEnd drains the head as
+// the next turn. Exactly-once by construction: onTurnEnd's drain is the ONLY
+// path that pulls from queuedTurns, so the head can never run twice (the
+// double-execution guard is "don't run it here — let the drain do it"). If the
+// interrupt can't land we fall back to a natural turn boundary; if no `result`
+// arrives we force onTurnEnd after a grace period so the head isn't stranded.
+export async function sendNow(): Promise<void> {
+	log.info('Subprocess', 'enter sendNow (interrupt + flush head)', { queueLen: queuedTurns.length }, '➡️');
+	if (!deps) { return; }
+
+	if (queuedTurns.length === 0) {
+		log.debug('Subprocess', 'sendNow with empty queue — noop', undefined, '🤷');
+		return;
+	}
+
+	if (!currentClaudeProcess || !isProcessing) {
+		// No turn in flight — just drain the head immediately (no interrupt needed).
+		const next = queuedTurns.shift()!;
+		emitQueueState();
+		void runTurn(next);
+		return;
+	}
+
+	try {
+		await sendControlRequest('interrupt', {});
+		log.info('Subprocess', 'sendNow interrupt acked — head will flush via onTurnEnd', undefined, '⏭️');
+		conversation.sendAndSaveMessage({
+			type: 'notice',
+			data: { title: 'Interrupted', content: 'Running the queued prompt now.', variant: 'warning' }
+		});
+		// Fallback: if the CLI doesn't emit a `result` after the interrupt acks,
+		// isProcessing would stick true and the head would never drain. Force a
+		// turn-end after a short grace period if we're still marked processing.
+		const procAtInterrupt = currentClaudeProcess;
+		setTimeout(() => {
+			if (isProcessing && currentClaudeProcess === procAtInterrupt) {
+				log.warn('Subprocess', 'no result after sendNow interrupt — forcing turn end', undefined, '⏱️');
+				onTurnEnd();
+			}
+		}, 6_000);
+	} catch (e: any) {
+		// Interrupt didn't land — leave the item queued; it flushes at the next
+		// natural turn boundary. Don't escalate to a kill (the user wants the
+		// queued prompt to run, not the session destroyed).
+		log.warn('Subprocess', 'sendNow interrupt failed — head stays queued for natural drain', { error: e?.message ?? String(e) }, '⚠️');
+	}
+}
+
+// CANCEL a queued item by id (the card's ✕). Removes it from queuedTurns and
+// re-emits so the peeking card updates to the next head or disappears.
+export function cancelQueued(id: string): void {
+	const before = queuedTurns.length;
+	queuedTurns = queuedTurns.filter(t => t.id !== id);
+	if (queuedTurns.length !== before) {
+		log.info('Subprocess', 'cancelQueued', { id, remaining: queuedTurns.length }, '🗑️');
+		emitQueueState();
+	}
+}
+
+// DEMOTE a queued item by id (the card's ⬇): remove it from the queue and hand
+// its full text + images + flags back to the webview so it can repopulate the
+// prompt input for editing. Nothing is silently lost.
+export function demoteQueued(id: string): void {
+	if (!deps) { return; }
+	const item = queuedTurns.find(t => t.id === id);
+	if (!item) {
+		log.debug('Subprocess', 'demoteQueued — id not found', { id }, '🤷');
+		return;
+	}
+	queuedTurns = queuedTurns.filter(t => t.id !== id);
+	log.info('Subprocess', 'demoteQueued', { id, remaining: queuedTurns.length }, '⬇️');
+	emitQueueState();
+	deps.postMessage({
+		type: 'queuedDemoted',
+		data: {
+			message: item.message,
+			planMode: !!item.planMode,
+			thinkingMode: !!item.thinkingMode,
+			images: (item.images || []).map(img =>
+				typeof img === 'string' ? { filePath: img } : { filePath: img.filePath, previewUri: img.previewUri }
+			),
+		},
+	});
+}
+
 // SKULL (hard): kill the process group (takes subagents) and PARK the session to
 // history so the UI can offer recycle/resume. Today's old hard-kill behavior.
 export async function skullProcess(): Promise<void> {
@@ -1444,6 +1661,8 @@ export async function skullProcess(): Promise<void> {
 	});
 
 	await killProcess();
+	// killProcess cleared queuedTurns; tell the webview so the peeking card clears.
+	emitQueueState();
 
 	deps.postMessage({
 		type: 'clearLoading'

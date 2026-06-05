@@ -489,6 +489,9 @@ async function handleWebviewMessage(message: any): Promise<void> {
       // be dropped. firstRunPrompt likewise gated here.
       sendModelFull();
       checkFirstRun();
+      // Resync the queued-prompt card after a (re)mount — its only other emit
+      // sites are queue mutations, which a fresh webview would have missed.
+      subprocess.emitQueueState();
       return;
     case "firstRunShown":
       // The first-run modal actually rendered; latch the flags so it shows once.
@@ -519,6 +522,18 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "skull":
       // Hard kill: terminate the process group and park to history.
       await subprocess.skullProcess();
+      return;
+    case "sendNow":
+      // Explicit interrupt + flush the head queued item now (the card's ⬆).
+      await subprocess.sendNow();
+      return;
+    case "cancelQueued":
+      // Remove a queued item by id (the card's ✕).
+      subprocess.cancelQueued(message.id);
+      return;
+    case "demoteQueued":
+      // Pull a queued item back into the prompt input (the card's ⬇).
+      subprocess.demoteQueued(message.id);
       return;
     case "forkSession":
       // Fork a (possibly locked) session into a new terminal session this
@@ -1653,18 +1668,25 @@ async function createImageFile(
     );
     fs.mkdirSync(imagesDir, { recursive: true });
 
+    // Prefix every image with the current session id (<sessionId>_<name>) so it
+    // can be cleaned up by filename glob when its conversation is deleted. Before
+    // the CLI mints a session id (brand-new chat, first turn not yet run) use a
+    // `pending_` prefix; system/init renames those to <sessionId>_ once it arrives.
+    const sessionId = conversation.getCurrentSessionId();
+    const prefix = sessionId ? `${sessionId}_` : "pending_";
+
     let imageFileName: string;
     if (originalName) {
       const parsed = path.parse(originalName);
-      let candidate = originalName;
+      let candidate = `${prefix}${originalName}`;
       let counter = 0;
       while (fs.existsSync(path.join(imagesDir, candidate))) {
         counter++;
-        candidate = `${parsed.name}_${counter}${parsed.ext}`;
+        candidate = `${prefix}${parsed.name}_${counter}${parsed.ext}`;
       }
       imageFileName = candidate;
     } else {
-      imageFileName = `image_${Date.now()}.${ext}`;
+      imageFileName = `${prefix}image_${Date.now()}.${ext}`;
     }
 
     const imagePath = path.join(imagesDir, imageFileName);
@@ -1701,6 +1723,17 @@ async function loadConversationHistory(filename: string): Promise<void> {
   try {
     const conversationData = await conversation.loadConversationData(filename);
     if (!conversationData) {
+      // The file is missing, empty, or corrupt (e.g. a truncated 0-byte save).
+      // Don't strand the UI at "initializing" — fall back to a clean session and
+      // still signal ready so the user can start typing.
+      log.warn(
+        "Webview",
+        "loadConversationHistory: conversation unreadable, falling back to new session",
+        { filename },
+        "⚠️",
+      );
+      conversation.newSession();
+      sendReadyMessage();
       return;
     }
 
@@ -1708,6 +1741,8 @@ async function loadConversationHistory(filename: string): Promise<void> {
     conversation.setConversationState(
       conversationData.messages || [],
       conversationData.startTime,
+      conversationData.title,
+      conversationData.titleLocked,
     );
     tokenCounters.setTotals(
       conversationData.totalCost || 0,
@@ -1813,6 +1848,13 @@ async function loadConversationHistory(filename: string): Promise<void> {
       { filename, error: error?.message ?? String(error) },
       "💥",
     );
+    // Recover rather than wedge: fall back to a clean session and signal ready.
+    try {
+      conversation.newSession();
+      sendReadyMessage();
+    } catch {
+      /* best-effort */
+    }
   }
 }
 

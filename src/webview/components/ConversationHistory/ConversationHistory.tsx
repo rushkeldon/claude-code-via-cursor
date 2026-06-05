@@ -13,6 +13,7 @@ interface ConversationItem {
   messageCount: number;
   firstUserMessage: string;
   lastUserMessage: string;
+  title?: string;
 }
 
 const conversations = signal<ConversationItem[]>([]);
@@ -91,7 +92,7 @@ export function ConversationHistory() {
                 <div class="conversation-item-content">
                   <span class="conversation-item-label">
                     {isLocked && <span class="conversation-item-lock" title="Active in another window">🔒</span>}
-                    {conv.firstUserMessage || 'Untitled'}
+                    {conv.title || conv.firstUserMessage || 'Untitled'}
                   </span>
                   <span class="conversation-item-meta">
                     {conv.messageCount} messages • {formatTime(conv.startTime)}

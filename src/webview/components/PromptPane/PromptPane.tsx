@@ -8,6 +8,8 @@ import { ModelSelector } from '../ModelSelector/ModelSelector';
 import { DroppedFile } from '../DroppedFile/DroppedFile';
 import { CommandAutocomplete } from '../CommandAutocomplete/CommandAutocomplete';
 import { slashCommandsVisible } from '../SlashCommands/SlashCommands';
+import { QueuedPrompt } from '../QueuedPrompt/QueuedPrompt';
+import { pendingQuestions } from '../AskUserQuestion/AskUserQuestion';
 
 export interface DroppedFileData {
   filePath: string;
@@ -25,8 +27,34 @@ const connectMenuOpen = signal(false);
 
 const INLINE_SAFE_COMMANDS = ['compact', 'clear'];
 
+// A queued prompt the user demoted (⬇) back into the input. Carries the text +
+// flags so the textarea + plan/thinking toggles can repopulate. Consumed (and
+// cleared) by an effect in PromptPane once applied to the live textarea.
+const pendingDemote = signal<{ message: string; planMode: boolean; thinkingMode: boolean } | null>(null);
+
+// Transient hint shown under the input when Send is blocked because a question
+// is pending (Phase C). Cleared on the next keystroke or when no question pends.
+const sendBlockedHint = signal(false);
+
 on('imageAttached' as any, (msg: any) => {
   images.value = [...images.value, { filePath: msg.filePath, previewUri: msg.previewUri || msg.thumbnailUri }];
+});
+
+on('queuedDemoted' as any, (msg: any) => {
+  const data = msg.data || {};
+  // Restore images immediately (their own signal); the text + flags are applied
+  // to the ref-based textarea by the effect below.
+  if (Array.isArray(data.images) && data.images.length > 0) {
+    images.value = [
+      ...images.value,
+      ...data.images.map((img: any) => ({ filePath: img.filePath, previewUri: img.previewUri || '' })),
+    ];
+  }
+  pendingDemote.value = {
+    message: data.message || '',
+    planMode: !!data.planMode,
+    thinkingMode: !!data.thinkingMode,
+  };
 });
 
 on('fileDropped' as any, (msg: any) => {
@@ -39,11 +67,48 @@ export function PromptPane() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isProcessing = processing.value;
 
+  // Apply a demoted queued prompt to the (ref-based) textarea + flags. Reads the
+  // signal so it re-runs whenever an item is pulled back via the card's ⬇.
+  const demote = pendingDemote.value;
+  useEffect(() => {
+    if (!demote) return;
+    const textarea = textareaRef.current;
+    if (textarea) {
+      // Prepend so we don't clobber anything the user already started typing.
+      const existing = textarea.value;
+      textarea.value = existing ? `${demote.message}\n${existing}` : demote.message;
+      autoResize(textarea);
+      textarea.focus();
+      const end = textarea.value.length;
+      textarea.setSelectionRange(end, end);
+    }
+    planMode.value = demote.planMode;
+    thinkingMode.value = demote.thinkingMode;
+    pendingDemote.value = null;
+  }, [demote]);
+
+  // Once the pending question is answered/cleared, the block-with-hint no longer
+  // applies — drop it so a stale "answer the question first" doesn't linger.
+  const hasPendingQuestion = pendingQuestions.value.length > 0;
+  useEffect(() => {
+    if (!hasPendingQuestion && sendBlockedHint.value) sendBlockedHint.value = false;
+  }, [hasPendingQuestion]);
+
   function sendMessage() {
     const textarea = textareaRef.current;
     if (!textarea) return;
     const userText = textarea.value.trim();
     if (!userText && images.value.length === 0 && droppedFiles.value.length === 0) return;
+
+    // Phase C — block-with-hint: while a question/permission is pending the turn
+    // can't end on its own, so a queued prompt behind it would be trapped. Don't
+    // silently queue; hint the user to answer the question and point at its card.
+    if (pendingQuestions.value.length > 0) {
+      sendBlockedHint.value = true;
+      const card = document.querySelector('.ask-user-question:not(.decided)') || document.querySelector('.ask-user-question');
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
 
     let text = '';
     if (droppedFiles.value.length > 0) {
@@ -101,6 +166,8 @@ export function PromptPane() {
   function handleInput(e: Event) {
     const textarea = e.currentTarget as HTMLTextAreaElement;
     autoResize(textarea);
+    // Any typing dismisses the "answer the question first" hint.
+    if (sendBlockedHint.value) sendBlockedHint.value = false;
 
     if (terminalMode.value) {
       if (!textarea.value.startsWith('/')) {
@@ -326,6 +393,10 @@ export function PromptPane() {
 
   return (
     <div class="input-container">
+      <QueuedPrompt />
+      {sendBlockedHint.value && (
+        <div class="send-blocked-hint">Answer the question above first.</div>
+      )}
       <ModelSelector />
       <div class="textarea-container">
         <div class="textarea-wrapper">

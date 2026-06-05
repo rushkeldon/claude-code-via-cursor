@@ -11,6 +11,7 @@ import * as skillsAndPlugins from './skillsAndPlugins';
 import * as subprocess from './subprocess';
 import * as sessionLock from './sessionLock';
 import * as webview from './webview';
+import { sweepOrphanImages } from './sessionImages';
 
 class DiffContentProvider implements vscode.TextDocumentContentProvider {
 	provideTextDocumentContent(uri: vscode.Uri): string {
@@ -81,6 +82,12 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const latestConversation = conversation.getLatestConversation();
 	conversation.setCurrentSessionId(latestConversation?.sessionId);
+
+	// One-shot orphan-image sweep: reclaim images whose session no longer exists in
+	// history (and that are older than the oldest surviving session, so live/just-
+	// attached files are never touched). The index is populated by conversation.init
+	// above. Runs once per window launch.
+	sweepOrphanImages(conversation.getConversationIndex());
 
 	// Register commands
 	const disposable = vscode.commands.registerCommand('claude-code-via-cursor.openChat', (column?: vscode.ViewColumn) => {

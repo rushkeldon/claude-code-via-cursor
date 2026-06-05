@@ -23,6 +23,9 @@ export type MessageToExtension =
   | { type: 'getModelList' }
   | { type: 'stop' }
   | { type: 'skull' }
+  | { type: 'sendNow' }
+  | { type: 'cancelQueued'; id: string }
+  | { type: 'demoteQueued'; id: string }
   | { type: 'resumeSession'; sessionId?: string }
   | { type: 'forkSession'; sessionId?: string }
 
@@ -59,6 +62,8 @@ export type MessageFromExtension =
   | { type: 'updatePermissionStatus'; data: { id: string; status: 'approved' | 'denied' | 'expired' | 'cancelled' } }
   | { type: 'askUserQuestion'; data: { id: string; questions: any[]; status: string; answers?: Record<string, string> } }
   | { type: 'updateAskUserQuestionStatus'; data: { id: string; status: string; answers: Record<string, string> | null } }
+  | { type: 'queueState'; data: { items: Array<{ id: string; preview: string; hasImages: boolean }> } }
+  | { type: 'queuedDemoted'; data: { message: string; planMode: boolean; thinkingMode: boolean; images: Array<{ filePath: string; previewUri?: string }> } }
 
 export function post(msg: MessageToExtension): void {
   vscode.postMessage(msg);

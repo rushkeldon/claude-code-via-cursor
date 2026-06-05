@@ -43,6 +43,10 @@ cursor --install-extension <vsix> --force
 
 Always bump `appcloud9.X` in `package.json` before packaging a new VSIX.
 
+### Plans must not hard-code a version
+
+Plan files (`*.plan.md`) must **never** name a specific version (e.g. "bump to appcloud9.73"). Always write "bump to the **next** version" instead. The number drifts — multiple agents bump `package.json` independently — so a hard-coded version in a plan goes stale and misleads. The version-bump todo reads the current `appcloud9.X` at execution time and increments it.
+
 ## Reference project
 
 `../claude-code-chat` is the monolithic HTML predecessor. Use it as reference when porting features — the extension host code is largely shared, but the old webview was a single HTML blob with inline scripts.
