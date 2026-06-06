@@ -876,6 +876,9 @@ async function performInitialize(proc: cp.ChildProcess): Promise<void> {
 			commands: cachedCommands?.length ?? 0,
 		}, '🤝');
 		postModelList();
+		// Populate the context-usage chip before the first turn (handshake-time
+		// occupancy: system prompt + memory + skills). Fire-and-forget.
+		void postContextUsage();
 	} catch (e: any) {
 		// Non-fatal: the editable model field + legacy settings path still work.
 		log.warn('Subprocess', 'initialize handshake failed (degrading)', { error: e?.message ?? String(e) }, '⚠️');
@@ -897,6 +900,44 @@ export function postModelList(): void {
 
 export function getCachedModels(): any[] | undefined {
 	return cachedModels;
+}
+
+// ── Context-window usage ──────────────────────────────────────────────────
+// `get_context_usage` is the SAME control request /context uses: it returns the
+// authoritative occupancy ({ totalTokens, maxTokens, percentage (already
+// computed), autoCompactThreshold, isAutoCompactEnabled, categories[] }) for the
+// live model. It is a control round-trip (no model turn → effectively free), so
+// we poll it at turn boundaries. Degrades silently on older binaries / errors.
+async function getContextUsage(): Promise<any | null> {
+	if (!currentClaudeProcess) { return null; }
+	try {
+		return await sendControlRequest('get_context_usage');
+	} catch (e: any) {
+		log.debug('Subprocess', 'get_context_usage failed (degrading)', { error: e?.message ?? String(e) }, '📐');
+		return null;
+	}
+}
+
+// Fetch context usage and post a compact slice to the webview. No-op (chip stays
+// hidden) if the call failed or returned no usable percentage.
+async function postContextUsage(): Promise<void> {
+	if (!deps) { return; }
+	const u = await getContextUsage();
+	if (!u || typeof u.percentage !== 'number') { return; }
+	deps.postMessage({
+		type: 'contextUsage',
+		data: {
+			totalTokens: u.totalTokens ?? 0,
+			maxTokens: u.maxTokens ?? 0,
+			percentage: u.percentage ?? 0,
+			autoCompactThreshold: u.autoCompactThreshold ?? 0,
+			isAutoCompactEnabled: !!u.isAutoCompactEnabled,
+			// {name, tokens} pairs for the hover tooltip; drop the color/grid fields.
+			categories: Array.isArray(u.categories)
+				? u.categories.map((c: any) => ({ name: c.name, tokens: c.tokens }))
+				: [],
+		},
+	});
 }
 
 // A model switch requested mid-turn, deferred to the next idle boundary so we
@@ -1620,6 +1661,9 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 					}
 				});
 
+				// Refresh the context-window chip now that the turn changed occupancy.
+				// Control round-trip, no model turn — effectively free. Fire-and-forget.
+				void postContextUsage();
 			}
 
 			// Turn complete (any result subtype). Flip processing off, disarm

@@ -26,7 +26,19 @@ export function StallHint() {
   return (
     <div class="stall-hint">
       <span class="stall-hint-icon">⏳</span>
-      <span>{message}</span>
+      <span class="stall-hint-text">{message}</span>
+      {/* Per-occurrence dismiss. The stall hint is often a false positive the
+          user already knows about — let them clear it immediately. A later
+          processStalled re-sets stallMessage, so a fresh stall can show again. */}
+      <button
+        class="stall-hint-close"
+        type="button"
+        title="Dismiss"
+        aria-label="Dismiss"
+        onClick={() => { stallMessage.value = null; }}
+      >
+        ✕
+      </button>
     </div>
   );
 }

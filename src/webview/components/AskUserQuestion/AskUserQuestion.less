@@ -39,10 +39,30 @@
   }
 }
 
-// When a resolved card is collapsed the body is unmounted, so the header is the
-// only child — drop its bottom margin so there's no dead space below it.
-.ask-user-question.decided:not(:has(.ask-question-content)) .ask-question-header {
-  margin-bottom: 0;
+// Resolved cards (answered/cancelled) use a compact, FIXED header treatment in
+// BOTH the collapsed and expanded states so the header never shifts when you
+// toggle it. The card top padding (4px), header font-size (12px), and header
+// bottom margin (0) stay identical regardless of whether the body is shown — the
+// only thing that changes on expand is the body appearing below. This both keeps
+// the collapsed row as compact as a READ tool row and stops the click-to-expand
+// jump the roomy 12px/13px base styling caused.
+.ask-user-question.decided {
+  padding: 4px 10px;
+
+  .ask-question-header {
+    margin-bottom: 0;
+    font-size: 12px;
+  }
+
+  // Expanded: give the body its own breathing room (top gap + card bottom
+  // padding) without touching the header above it.
+  &:has(.ask-question-content) {
+    padding-bottom: 10px;
+  }
+
+  .ask-question-content {
+    margin-top: 8px;
+  }
 }
 
 .ask-question-chevron {
