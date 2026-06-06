@@ -1,3 +1,5 @@
+@import (reference) "../../styles/mixins.less";
+
 .settings-modal-content {
   display: flex;
   flex-direction: column;
@@ -219,9 +221,9 @@
 }
 
 .btn-link {
+  .hyperlink();
   background: none;
   border: none;
-  color: var(--vscode-textLink-foreground);
   cursor: pointer;
   font-size: 12px;
   padding: 4px 0;
@@ -286,4 +288,52 @@
     background: rgba(255, 0, 0, 0.1);
     color: var(--vscode-errorForeground);
   }
+}
+
+/* About page — replaces the settings body in-place (back arrow returns). */
+.about-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.about-back-btn {
+  .hyperlink();
+  align-self: flex-start;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 0;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.about-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.about-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.about-tagline {
+  margin: 0;
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  line-height: 1.5;
+}
+
+.about-placeholder {
+  margin: 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
 }

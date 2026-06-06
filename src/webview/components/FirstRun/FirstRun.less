@@ -1,5 +1,11 @@
+@import (reference) "../../styles/mixins.less";
+
 .first-run-content {
   font-size: 12px;
+
+  a {
+    .hyperlink();
+  }
 }
 
 .first-run-intro {
@@ -100,6 +106,16 @@
       background: var(--vscode-button-hoverBackground);
     }
   }
+}
+
+.first-run-disclaimer {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--vscode-panel-border);
+  background: var(--vscode-textBlockQuote-background);
 }
 
 .first-run-hint {

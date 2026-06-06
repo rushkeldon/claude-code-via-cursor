@@ -12,7 +12,12 @@ import {
 
 export const settingsModalVisible = signal(false);
 
+// Which view the settings modal is showing: the settings list, or the About
+// page (which replaces the modal body in-place, with a back arrow to return).
+const settingsView = signal<"settings" | "about">("settings");
+
 on("showSettings", () => {
+  settingsView.value = "settings";
   settingsModalVisible.value = true;
 });
 
@@ -594,16 +599,70 @@ function TerminalSection() {
   );
 }
 
+function AboutSection() {
+  return (
+    <div class="settings-section">
+      <h3 class="settings-section-title">About</h3>
+      <p class="settings-hint">
+        Version info and details about this extension.
+      </p>
+      <div class="settings-group">
+        <button class="btn-link" onClick={() => (settingsView.value = "about")}>
+          About this extension
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AboutPage() {
+  return (
+    <div class="about-page">
+      <button
+        class="about-back-btn"
+        type="button"
+        title="Back to settings"
+        onClick={() => (settingsView.value = "settings")}
+      >
+        ⬅ Back
+      </button>
+
+      <div class="about-content">
+        <h2 class="about-title">Claude Code via Cursor</h2>
+        <p class="about-tagline">
+          A rich, multi-modal interface around the Claude Code CLI — full Claude
+          Code power, inside your editor.
+        </p>
+
+        {/* Placeholder — populate with real content later. */}
+        <p class="about-placeholder">
+          More information about the extension will go here.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModal() {
+  const view = settingsView.value;
   return (
     <Modal
-      title="Claude Code via Cursor — Settings"
+      title={
+        view === "about"
+          ? "Claude Code via Cursor — About"
+          : "Claude Code via Cursor — Settings"
+      }
       visible={settingsModalVisible.value}
       onClose={() => {
         settingsModalVisible.value = false;
+        // Reset to the settings view so a future open starts on settings, not
+        // wherever the user last navigated.
+        settingsView.value = "settings";
       }}
     >
-      {fullSettings.value ? (
+      {view === "about" ? (
+        <AboutPage />
+      ) : fullSettings.value ? (
         <div class="settings-modal-content">
           <ModelSection />
           <WSLSection />
@@ -612,6 +671,7 @@ export function SettingsModal() {
           <SkillsSection />
           <FirstRunSection />
           <CustomizeSection />
+          <AboutSection />
         </div>
       ) : (
         <p class="settings-loading">Loading settings...</p>

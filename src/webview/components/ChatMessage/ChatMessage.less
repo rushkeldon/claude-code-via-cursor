@@ -1,3 +1,5 @@
+@import (reference) "../../styles/mixins.less";
+
 .message {
   margin-bottom: 10px;
   padding: 4px 6px 6px 6px;
@@ -368,7 +370,7 @@
   }
 
   a {
-    color: var(--vscode-textLink-foreground);
+    .hyperlink();
     text-decoration: none;
 
     &:hover {

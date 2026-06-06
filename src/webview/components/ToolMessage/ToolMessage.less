@@ -1,3 +1,5 @@
+@import (reference) "../../styles/mixins.less";
+
 .tool-header {
   display: flex;
   align-items: center;
@@ -66,16 +68,9 @@
 }
 
 .tool-file-link {
-  // Light cornflower blue — the theme's default link color (teal) clashed with
-  // the scheme and read too close to the Thoughts toggle. Hard-coded so it stays
-  // consistent regardless of VS Code theme.
-  color: #a6c8ff;
+  .hyperlink();
   cursor: pointer;
   text-decoration: underline;
-
-  &:hover {
-    color: #c4daff;
-  }
 }
 
 // Inline path in the collapsed header: take the remaining width and truncate the

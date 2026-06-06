@@ -143,6 +143,13 @@ export function FirstRun() {
           </button>
         </div>
 
+        <p class="first-run-disclaimer">
+          Heads up: the token count, context percentage, and session cost shown
+          in the UI are approximate by nature — they're estimates from Claude
+          Code, useful as at-a-glance signals, not exact accounting. For
+          authoritative billing, check the Claude Console.
+        </p>
+
         <p class="first-run-hint">
           You can always install skills later from Settings.
         </p>

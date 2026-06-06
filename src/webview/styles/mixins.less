@@ -1,0 +1,45 @@
+// Shared Less mixins + design tokens. Import with
+// `@import (reference) "../../styles/mixins.less";` in any component .less that
+// needs them — (reference) means this file emits no CSS on its own; only the
+// mixin bodies you call (and the variables you reference) are inlined at the
+// call site.
+
+// ── Link color ─────────────────────────────────────────────────────────────
+// Cornflower blue. The VS Code theme's default link color (teal) clashed with
+// the scheme and read too close to the green toggle accents, so every
+// underlined hyperlink hard-codes this instead — consistent regardless of theme.
+@link-color: #a6c8ff;
+@link-color-hover: #c4daff;
+
+// Apply to any underlined hyperlink (real <a>, or a link-styled button). Sets
+// only the color + hover color; each call site keeps its own text-decoration,
+// cursor, padding, etc.
+.hyperlink() {
+  color: @link-color;
+
+  &:hover {
+    color: @link-color-hover;
+  }
+}
+
+// ── Action button ──────────────────────────────────────────────────────────
+// Every prompt-pane / Q&A action button (Send, Stop, Submit, Cancel) pulls
+// `.action-button()` so the shared metrics (font, size, weight, padding,
+// radius, centering) live in ONE place and stay uniform. Each button then sets
+// only its own colors/variant on top.
+.action-button() {
+  font-family: var(--vscode-font-family); // UI sans — NOT the prompt pane's monospace
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 7px;
+  min-height: 11px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  box-sizing: content-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
