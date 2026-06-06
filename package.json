@@ -2,7 +2,7 @@
   "name": "claude-code-via-cursor",
   "displayName": "Claude Code via Cursor",
   "description": "Personal fork of Claude Code Chat with the OpenCredits integration removed. Routes only to your local Claude Code.",
-  "version": "3.0.0-appcloud9.110",
+  "version": "3.0.0-appcloud9.111",
   "publisher": "appcloud9",
   "author": "Keldon Rush (appcloud9.com)",
   "repository": {

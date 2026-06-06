@@ -1123,44 +1123,22 @@ async function handleDroppedFileByName(
   });
 }
 
-const INLINE_SAFE_COMMANDS = ["compact", "clear"];
-
 function fetchCommandList(): void {
   log.debug("Webview", "fetchCommandList", undefined, "➡️");
 
-  // Serve from cache immediately
-  if (deps) {
-    const cached = deps.getGlobalState().get<any[]>('cachedCommandList');
-    if (cached && cached.length > 0) {
-      postMessage({ type: "commandList", data: cached });
-      return;
-    }
+  // Serve the authoritative initialize-handshake list. It's free (no model
+  // turn), fast, and already filtered to the commands that work in this
+  // (headless) session. The list is cached from the most recent handshake; if
+  // the panel is cold (no handshake yet) it arrives unprompted via
+  // subprocess.postCommandList() once performInitialize() resolves.
+  const cmds = subprocess.getCachedCommands();
+  if (cmds && cmds.length > 0) {
+    postMessage({ type: "commandList", data: cmds });
+    return;
   }
-
-  // Async background fetch via separate claude --print process
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
-  const claudePath = (config.get<string>("executable.path", "") || "").trim() || "claude";
-  cp.execFile(claudePath, ["--print", 'List all your slash commands and skills available in this session. Return ONLY valid JSON, nothing else: {"commands":[{"name":"command_name","description":"one line description"}],"skills":[{"name":"skill_name","description":"one line description"}]}'], { timeout: 60000 }, (error, stdout) => {
-    if (error) {
-      log.error("Webview", "fetchCommandList failed", { error: error.message }, "💥");
-      return;
-    }
-    try {
-      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("No JSON found in response");
-      const parsed = JSON.parse(jsonMatch[0]);
-      const commands = (parsed.commands || []).map((c: any) => ({ ...c, type: "builtin" }));
-      const skills = (parsed.skills || []).map((s: any) => ({ ...s, type: "skill" }));
-      const list = [...commands, ...skills];
-      postMessage({ type: "commandList", data: list });
-      if (deps) {
-        deps.getGlobalState().update('cachedCommandList', list);
-      }
-      log.debug("Webview", "fetchCommandList success", { count: list.length }, "✅");
-    } catch (parseError: any) {
-      log.error("Webview", "fetchCommandList parse failed", { error: parseError.message }, "💥");
-    }
-  });
+  // No handshake yet — post an empty list so the palette renders, then the
+  // real list lands when the subprocess finishes initializing.
+  postMessage({ type: "commandList", data: [] });
 }
 
 // Fork an explicit session id into a new terminal session (the History "Fork"
@@ -1191,18 +1169,16 @@ function forkSessionToTerminal(sessionId: string | undefined): void {
   log.info("Webview", "forked session to terminal", { sessionId, forkModel }, "🍴");
 }
 
+// Breakout to a real terminal. Typed slash commands no longer route here —
+// they pass straight through to the warm subprocess via sendMessage. This is
+// reached only by the explicit toolbar breakout button (an on-demand fork) and
+// always forks: `--resume <id> --fork-session` copies the transcript into a new
+// session id, leaving the extension's session as the sole writer of its own.
 async function launchSlashCommand(
   command: string,
   forceExternal?: boolean,
 ): Promise<void> {
   log.debug("Webview", "launchSlashCommand", { command, forceExternal }, "➡️");
-  const cmdName = command.replace(/^\//, "").split(/\s+/)[0];
-
-  if (cmdName && !forceExternal && INLINE_SAFE_COMMANDS.includes(cmdName)) {
-    const fullCommand = command.startsWith("/") ? command : `/${command}`;
-    subprocess.sendMessage(fullCommand);
-    return;
-  }
 
   const sessionId = conversation.getCurrentSessionId();
 
