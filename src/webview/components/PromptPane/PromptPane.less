@@ -347,7 +347,8 @@
   }
 }
 
-// Terminal mode
+// Pass-through mode — the green treatment signals a raw slash-command
+// pass-through straight to Claude Code (not a breakout to a terminal).
 
 .textarea-input-wrapper {
   position: relative;
@@ -361,31 +362,5 @@
   &::placeholder {
     color: var(--terminal-font-color, #00ff41);
     opacity: 0.5;
-  }
-}
-
-.terminal-launch-icon {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  background: none;
-  border: none;
-  color: var(--vscode-descriptionForeground);
-  opacity: 0.4;
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    opacity: 1;
-    color: #fff;
-  }
-
-  &--active {
-    opacity: 0.9;
-    color: #fff;
   }
 }

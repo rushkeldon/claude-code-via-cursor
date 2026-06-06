@@ -1,7 +1,7 @@
 import './SessionStatus.less';
 import { signal, computed } from '@preact/signals';
 import { on } from '../../vscode';
-import { tokenState } from '../../state/tokens';
+import { tokenState, contextUsage } from '../../state/tokens';
 
 type StatusState = 'ready' | 'processing' | 'error' | 'disconnected';
 
@@ -79,13 +79,46 @@ const displayText = computed(() => {
   return parts.join(' • ');
 });
 
+// Color class keyed off the % of the WINDOW (Cursor-style "getting full"),
+// independent of whether auto-compact is enabled: amber at 80%, red at 90%.
+function ctxClass(percentage: number): string {
+  if (percentage >= 90) { return 'session-status-ctx ctx--full'; }
+  if (percentage >= 80) { return 'session-status-ctx ctx--warn'; }
+  return 'session-status-ctx';
+}
+
 export function SessionStatus() {
   const state = statusState.value;
+  const cu = contextUsage.value;
+
+  // Show the ctx chip on both the Ready and Processing lines, but only once we
+  // have a real reading (hide entirely until the first get_context_usage). It's
+  // stale mid-turn — always-visible is preferred over flicker.
+  const showCtx = !!cu && cu.maxTokens > 0 && (state === 'ready' || state === 'processing');
 
   return (
     <div class={`session-status ${state}`}>
       <div class="session-status-indicator"></div>
       <div class="session-status-text">{displayText.value}</div>
+      {showCtx && cu && (
+        <div class={ctxClass(cu.percentage)}>
+          ctx {cu.percentage}%
+          <div class="session-status-ctx-tooltip">
+            <div class="session-status-ctx-tooltip-total">
+              {cu.totalTokens.toLocaleString()} / {cu.maxTokens.toLocaleString()} tokens
+              {cu.isAutoCompactEnabled && cu.autoCompactThreshold > 0 && (
+                <span> · auto-compact at {cu.autoCompactThreshold.toLocaleString()}</span>
+              )}
+            </div>
+            {cu.categories.map((c) => (
+              <div class="session-status-ctx-tooltip-row" key={c.name}>
+                <span class="session-status-ctx-tooltip-name">{c.name}</span>
+                <span class="session-status-ctx-tooltip-tokens">{c.tokens.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

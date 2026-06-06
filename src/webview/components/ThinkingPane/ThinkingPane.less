@@ -6,8 +6,12 @@
 @thinking-collapse-delay: 2s;
 
 .thinking-live {
-  margin: 8px 0 4px 0;
-  padding: 10px 12px 10px 14px;
+  // Compact vertical rhythm. In the header-only state (no thought text yet —
+  // the "THINKING… 5.3s" row) the pane is as short as a READ/EDIT tool row, with
+  // the header content vertically centered. Breathing room is added back only
+  // when thought content is present (see the :has rule below).
+  margin: 2px 0;
+  padding: 4px 12px 4px 14px;
   border-left: 2px solid
     var(--vscode-textBlockQuote-border, var(--vscode-panel-border));
   background: var(
@@ -36,6 +40,8 @@
   }
 
   .thinking-header {
+    display: flex;
+    align-items: center;
     font-style: normal;
     font-weight: 600;
     font-size: 11px;
@@ -43,13 +49,26 @@
     text-transform: uppercase;
     color: var(--vscode-descriptionForeground);
     opacity: 0.8;
-    margin-bottom: 6px;
+    // No bottom margin by default — the header-only state stays a tight,
+    // centered single row. The :has rule re-adds the gap when content follows.
+    margin-bottom: 0;
 
     &::before {
       content: "●";
       margin-right: 6px;
       color: var(--vscode-charts-orange, #ff9500);
       animation: thinkingPulse 1.4s ease-in-out infinite;
+    }
+  }
+
+  // Expanded (thought text streaming in): give the header a gap above the
+  // content and the pane a little bottom padding, without affecting the compact
+  // header-only state.
+  &:has(.thinking-content) {
+    padding-bottom: 10px;
+
+    .thinking-header {
+      margin-bottom: 6px;
     }
   }
 

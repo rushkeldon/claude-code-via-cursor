@@ -26,8 +26,6 @@ const images = signal<Array<{ filePath: string; previewUri: string }>>([]);
 const droppedFiles = signal<DroppedFileData[]>([]);
 const connectMenuOpen = signal(false);
 
-const INLINE_SAFE_COMMANDS = ['compact', 'clear'];
-
 // A queued prompt the user demoted (⬇) back into the input. Carries the text +
 // flags so the textarea + plan/thinking toggles can repopulate. Consumed (and
 // cleared) by an effect in PromptPane once applied to the live textarea.
@@ -149,7 +147,7 @@ export function PromptPane() {
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        executeTerminalCommand(false);
+        executeTerminalCommand();
         return;
       }
       return;
@@ -194,10 +192,19 @@ export function PromptPane() {
     }
   }
 
-  function executeTerminalCommand(forceExternal: boolean) {
-    const command = terminalInput.value || textareaRef.current?.value || '';
-    if (!command.trim()) return;
-    post({ type: 'launchSlashCommand', command: command.trim(), forceExternal } as any);
+  function executeTerminalCommand() {
+    const command = (terminalInput.value || textareaRef.current?.value || '').trim();
+    if (!command) return;
+    // Raw pass-through over the existing stream-json stdin channel — the same
+    // path a normal message takes. No denylist: the CLI's headless initialize
+    // list already excludes TTY-only commands, so anything the palette offered
+    // is safe to send inline. The toolbar breakout (below) stays as a manual,
+    // on-demand fork for anyone who deliberately wants a real terminal.
+    post({
+      type: 'sendMessage',
+      text: command,
+      planMode: planMode.value,
+    });
     exitTerminalMode();
   }
 
@@ -208,11 +215,6 @@ export function PromptPane() {
       terminalInput.value = `/${cmd.name} `;
       textarea.focus();
     }
-  }
-
-  function isCommandExternal(): boolean {
-    const cmdName = terminalInput.value.replace(/^\//, '').split(/\s+/)[0];
-    return !INLINE_SAFE_COMMANDS.includes(cmdName);
   }
 
   function autoResize(el: HTMLTextAreaElement) {
@@ -432,26 +434,12 @@ export function PromptPane() {
             <textarea
               ref={textareaRef}
               class={`input-field${terminalMode.value ? ' terminal-mode' : ''}`}
-              placeholder={terminalMode.value ? 'Type a slash command...' : 'Type your message to Claude Code...'}
+              placeholder={terminalMode.value ? 'Slash command — sent straight to Claude Code...' : 'Type your message to Claude Code...'}
               rows={1}
               onKeyDown={handleKeyDown}
               onInput={handleInput}
               style={terminalMode.value ? { borderColor: 'var(--terminal-border-color, #00ff41)', color: 'var(--terminal-font-color, #00ff41)' } : undefined}
             />
-            {terminalMode.value && (
-              <button
-                class={`terminal-launch-icon ${isCommandExternal() ? 'terminal-launch-icon--active' : ''}`}
-                type="button"
-                title={isCommandExternal() ? 'Will launch in external terminal' : 'Click to force external terminal'}
-                onClick={() => executeTerminalCommand(true)}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                  <polyline points="15 3 21 3 21 9" />
-                  <line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-              </button>
-            )}
           </div>
           <div class="input-controls">
             <div class="left-controls">

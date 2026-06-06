@@ -876,9 +876,32 @@ async function performInitialize(proc: cp.ChildProcess): Promise<void> {
 			commands: cachedCommands?.length ?? 0,
 		}, '🤝');
 		postModelList();
+		postCommandList();
+		// Populate the context-usage chip before the first turn (handshake-time
+		// occupancy: system prompt + memory + skills). Fire-and-forget.
+		void postContextUsage();
 	} catch (e: any) {
 		// Non-fatal: the editable model field + legacy settings path still work.
 		log.warn('Subprocess', 'initialize handshake failed (degrading)', { error: e?.message ?? String(e) }, '⚠️');
+	}
+}
+
+// Re-run the initialize handshake purely to refresh the command list, then push
+// it to the palette. Triggered by the `commands_changed` stream event. No-op if
+// there's no live process. Degrades silently — the stale list stays usable.
+async function refreshCommandList(): Promise<void> {
+	const proc = currentClaudeProcess;
+	if (!proc) { return; }
+	try {
+		const resp = await sendControlRequest('initialize', { hooks: {}, sdkMcpServers: [] });
+		if (currentClaudeProcess !== proc) { return; }
+		if (Array.isArray(resp?.commands)) {
+			cachedCommands = resp.commands;
+			postCommandList();
+			log.info('Subprocess', 'command list refreshed (commands_changed)', { commands: resp.commands.length }, '🔄');
+		}
+	} catch (e: any) {
+		log.debug('Subprocess', 'refreshCommandList failed (degrading)', { error: e?.message ?? String(e) }, '⚠️');
 	}
 }
 
@@ -897,6 +920,82 @@ export function postModelList(): void {
 
 export function getCachedModels(): any[] | undefined {
 	return cachedModels;
+}
+
+// The `initialize` handshake returns a flat `commands: SlashCommand[]` list
+// ({ name, description, argumentHint, aliases? }) with NO skill-vs-builtin
+// discriminator. The badge in the palette is purely cosmetic, so we classify
+// with a small set of known CLI built-ins; everything else is a skill/command
+// file. (Verified against CLI 2.1.167: built-ins present in the headless list
+// are clear/compact/context/init/usage/review/debug/heapdump/reload-skills/…;
+// the set below is the conservative "definitely a built-in" core.)
+const BUILTIN_COMMANDS = new Set([
+	'clear', 'compact', 'context', 'init', 'usage', 'cost', 'help', 'model',
+	'review', 'debug', 'heapdump', 'reload-skills', 'status', 'doctor',
+	'memory', 'permissions',
+]);
+
+interface WebviewCommand { name: string; description: string; type: 'builtin' | 'skill'; }
+
+function mapCommandForWebview(c: any): WebviewCommand {
+	return {
+		name: c?.name ?? '',
+		description: c?.description ?? '',
+		type: BUILTIN_COMMANDS.has(c?.name) ? 'builtin' : 'skill',
+	};
+}
+
+// The mapped command list from the most recent initialize handshake, served to
+// the palette synchronously (fetchCommandList) and pushed on refresh.
+export function getCachedCommands(): WebviewCommand[] | undefined {
+	return cachedCommands ? cachedCommands.map(mapCommandForWebview) : undefined;
+}
+
+// Push the handshake command list to the webview palette. Mirrors postModelList.
+export function postCommandList(): void {
+	if (!deps) { return; }
+	deps.postMessage({
+		type: 'commandList',
+		data: (cachedCommands ?? []).map(mapCommandForWebview),
+	});
+}
+
+// ── Context-window usage ──────────────────────────────────────────────────
+// `get_context_usage` is the SAME control request /context uses: it returns the
+// authoritative occupancy ({ totalTokens, maxTokens, percentage (already
+// computed), autoCompactThreshold, isAutoCompactEnabled, categories[] }) for the
+// live model. It is a control round-trip (no model turn → effectively free), so
+// we poll it at turn boundaries. Degrades silently on older binaries / errors.
+async function getContextUsage(): Promise<any | null> {
+	if (!currentClaudeProcess) { return null; }
+	try {
+		return await sendControlRequest('get_context_usage');
+	} catch (e: any) {
+		log.debug('Subprocess', 'get_context_usage failed (degrading)', { error: e?.message ?? String(e) }, '📐');
+		return null;
+	}
+}
+
+// Fetch context usage and post a compact slice to the webview. No-op (chip stays
+// hidden) if the call failed or returned no usable percentage.
+async function postContextUsage(): Promise<void> {
+	if (!deps) { return; }
+	const u = await getContextUsage();
+	if (!u || typeof u.percentage !== 'number') { return; }
+	deps.postMessage({
+		type: 'contextUsage',
+		data: {
+			totalTokens: u.totalTokens ?? 0,
+			maxTokens: u.maxTokens ?? 0,
+			percentage: u.percentage ?? 0,
+			autoCompactThreshold: u.autoCompactThreshold ?? 0,
+			isAutoCompactEnabled: !!u.isAutoCompactEnabled,
+			// {name, tokens} pairs for the hover tooltip; drop the color/grid fields.
+			categories: Array.isArray(u.categories)
+				? u.categories.map((c: any) => ({ name: c.name, tokens: c.tokens }))
+				: [],
+		},
+	});
 }
 
 // A model switch requested mid-turn, deferred to the next idle boundary so we
@@ -1358,6 +1457,14 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 			}
 			break;
 
+		case 'commands_changed':
+			// The slash-command set changed (e.g. a skill installed/reloaded mid
+			// session). The event isn't guaranteed to carry the refreshed list, so
+			// re-run the initialize handshake to repopulate cachedCommands, then
+			// push it to the palette. Fire-and-forget; degrades silently.
+			void refreshCommandList();
+			break;
+
 		case 'assistant':
 			if (jsonData.message && jsonData.message.content) {
 				if (jsonData.message.usage) {
@@ -1620,6 +1727,9 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 					}
 				});
 
+				// Refresh the context-window chip now that the turn changed occupancy.
+				// Control round-trip, no model turn — effectively free. Fire-and-forget.
+				void postContextUsage();
 			}
 
 			// Turn complete (any result subtype). Flip processing off, disarm

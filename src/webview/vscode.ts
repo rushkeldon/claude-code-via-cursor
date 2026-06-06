@@ -58,6 +58,7 @@ export type MessageFromExtension =
   | { type: 'detectedTerminals'; data: { terminals: string[]; platform: string } }
   | { type: 'updateTokens'; data: any }
   | { type: 'updateTotals'; data: any }
+  | { type: 'contextUsage'; data: { totalTokens: number; maxTokens: number; percentage: number; autoCompactThreshold: number; isAutoCompactEnabled: boolean; categories: Array<{ name: string; tokens: number }> } }
   | { type: 'settingsData'; data: any }
   | { type: 'permissionsData'; data: any }
   | { type: 'permissionRequest'; data: { id: string; tool: string; input: Record<string, any>; pattern?: string; suggestions?: any[]; decisionReason?: any; blockedPath?: any; status: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled' } }

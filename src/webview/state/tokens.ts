@@ -23,6 +23,25 @@ export const tokenState = signal<TokenState>({
   cacheRead: 0,
 });
 
+// Authoritative context-window occupancy from the CLI's get_context_usage
+// (the same data /context shows). Separate signal from tokenState: different
+// cadence (post-turn poll, not per-stream) and source. null until the first
+// reading arrives, so the status bar can hide the chip entirely until then.
+export interface ContextUsage {
+  totalTokens: number;
+  maxTokens: number;
+  percentage: number;
+  autoCompactThreshold: number;
+  isAutoCompactEnabled: boolean;
+  categories: Array<{ name: string; tokens: number }>;
+}
+
+export const contextUsage = signal<ContextUsage | null>(null);
+
+on('contextUsage' as any, (msg: any) => {
+  contextUsage.value = msg.data as ContextUsage;
+});
+
 on('updateTokens' as any, (msg: any) => {
   tokenState.value = {
     ...tokenState.value,

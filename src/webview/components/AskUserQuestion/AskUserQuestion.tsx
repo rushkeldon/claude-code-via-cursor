@@ -335,6 +335,11 @@ export function InlineQuestionCard({
     questions: questionData.questions,
     status: questionData.status,
     answers: questionData.answers,
+    // Carry the preserved raw state through so the resolved card re-checks the
+    // user's exact options and re-shows their typed text. Omitting these (the
+    // previous bug) left every reopened card seeding empty selection state.
+    selections: questionData.selections,
+    freeTexts: questionData.freeTexts,
   };
   return <QuestionCard data={asData} isResolved={true} />;
 }
