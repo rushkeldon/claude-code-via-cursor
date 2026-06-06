@@ -5,6 +5,8 @@ import { post, on } from '../../vscode';
 import { processing } from '../../state/session';
 import { commandList } from '../../state/commands';
 import { ModelSelector } from '../ModelSelector/ModelSelector';
+import { EffortPicker } from '../EffortPicker/EffortPicker';
+import { ThoughtsToggle } from '../ThoughtsToggle/ThoughtsToggle';
 import { DroppedFile } from '../DroppedFile/DroppedFile';
 import { CommandAutocomplete } from '../CommandAutocomplete/CommandAutocomplete';
 import { slashCommandsVisible } from '../SlashCommands/SlashCommands';
@@ -18,7 +20,6 @@ export interface DroppedFileData {
 }
 
 const planMode = signal(false);
-const thinkingMode = signal(false);
 const terminalMode = signal(false);
 const terminalInput = signal('');
 const images = signal<Array<{ filePath: string; previewUri: string }>>([]);
@@ -30,7 +31,7 @@ const INLINE_SAFE_COMMANDS = ['compact', 'clear'];
 // A queued prompt the user demoted (⬇) back into the input. Carries the text +
 // flags so the textarea + plan/thinking toggles can repopulate. Consumed (and
 // cleared) by an effect in PromptPane once applied to the live textarea.
-const pendingDemote = signal<{ message: string; planMode: boolean; thinkingMode: boolean } | null>(null);
+const pendingDemote = signal<{ message: string; planMode: boolean } | null>(null);
 
 // Transient hint shown under the input when Send is blocked because a question
 // is pending (Phase C). Cleared on the next keystroke or when no question pends.
@@ -53,7 +54,6 @@ on('queuedDemoted' as any, (msg: any) => {
   pendingDemote.value = {
     message: data.message || '',
     planMode: !!data.planMode,
-    thinkingMode: !!data.thinkingMode,
   };
 });
 
@@ -83,7 +83,6 @@ export function PromptPane() {
       textarea.setSelectionRange(end, end);
     }
     planMode.value = demote.planMode;
-    thinkingMode.value = demote.thinkingMode;
     pendingDemote.value = null;
   }, [demote]);
 
@@ -122,7 +121,6 @@ export function PromptPane() {
       type: 'sendMessage',
       text,
       planMode: planMode.value,
-      thinkingMode: thinkingMode.value,
       images: images.value.length > 0 ? images.value : undefined,
     });
 
@@ -227,10 +225,6 @@ export function PromptPane() {
     if (planMode.value) {
       post({ type: 'showInfoMessage', message: 'Plan mode enabled — Claude will plan before making changes.' } as any);
     }
-  }
-
-  function toggleThinking() {
-    thinkingMode.value = !thinkingMode.value;
   }
 
   function selectImage() {
@@ -397,7 +391,11 @@ export function PromptPane() {
       {sendBlockedHint.value && (
         <div class="send-blocked-hint">Answer the question above first.</div>
       )}
-      <ModelSelector />
+      <div class="model-controls-row">
+        <ModelSelector />
+        <EffortPicker />
+        <ThoughtsToggle />
+      </div>
       <div class="textarea-container">
         <div class="textarea-wrapper">
           {images.value.length > 0 && (
@@ -481,22 +479,6 @@ export function PromptPane() {
                 )}
               </div>
               <button class={`input-toggle-btn${planMode.value ? ' active' : ''}`} type="button" onClick={togglePlan}>Plan</button>
-              <button class={`input-toggle-btn${thinkingMode.value ? ' active' : ''}`} type="button" onClick={toggleThinking}>
-                {thinkingMode.value ? (
-                  <>
-                    <span style="color:#d4735c">U</span>
-                    <span style="color:#d49a52">l</span>
-                    <span style="color:#c4a84e">t</span>
-                    <span style="color:#a8b85a">r</span>
-                    <span style="color:#6ab87a">a</span>
-                    <span style="color:#52b8a8">t</span>
-                    <span style="color:#5a9ed4">h</span>
-                    <span style="color:#7a7ec8">i</span>
-                    <span style="color:#a864b8">n</span>
-                    <span style="color:#c85aa0">k</span>
-                  </>
-                ) : 'Ultrathink'}
-              </button>
             </div>
             <div class="right-controls">
               <button class="slash-btn" type="button" onClick={() => { if (terminalMode.value) { exitTerminalMode(); } else { const ta = textareaRef.current; if (ta) { ta.value = '/'; ta.focus(); } enterTerminalMode(); } }} title="Slash commands">/</button>

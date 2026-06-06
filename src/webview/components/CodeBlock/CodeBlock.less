@@ -1,0 +1,49 @@
+// A fenced code block rendered as a real component (header + CopyButton child).
+// The wrap reveals the copy button on hover, mirroring the other copy hosts.
+.code-block-wrap {
+  margin: 8px 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--vscode-panel-border);
+
+  &:hover .copy-button {
+    opacity: 0.7;
+  }
+
+  .code-block-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 6px 2px 10px;
+    background: rgba(127, 127, 127, 0.1);
+    border-bottom: 1px solid var(--vscode-panel-border);
+  }
+
+  .code-block-lang {
+    flex: 1;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  // Body. Mirrors the prior `.message-content pre` styling so highlighting and
+  // spacing are unchanged from before the component split.
+  pre.code-block {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.2));
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    font-family: var(--vscode-editor-font-family);
+
+    code {
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      font-size: inherit;
+    }
+  }
+}

@@ -3,7 +3,7 @@
 // overlaps the chat history's bottom edge instead of adding pane height.
 .queued-prompt {
   position: absolute;
-  bottom: calc(100% - 25px);
+  bottom: calc(100% - 40px);
   left: 10px;
   right: 10px;
   margin-bottom: 6px;
@@ -14,7 +14,9 @@
   padding: 5px 8px;
   box-sizing: border-box;
   background-color: var(--vscode-input-background);
-  border: 1px solid var(--vscode-input-border);
+  // Same slight green outline the real user message in chat history uses
+  // (.message.user), to hint "this is your prompt, waiting."
+  border: 1px solid rgba(0, 255, 65, 0.25);
   border-radius: 8px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   font-size: 12px;
@@ -29,8 +31,11 @@
   letter-spacing: 0.04em;
   padding: 2px 6px;
   border-radius: 10px;
-  background-color: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
+  // The Matrix-green left-bar gradient from the real user message
+  // (.message.user::before) — so the badge reads as "user prompt, waiting."
+  background: linear-gradient(180deg, #00ff41 0%, #008f11 100%);
+  // Dark text on the bright phosphor green keeps the label legible.
+  color: #001b00;
 }
 
 .queued-prompt-count {
@@ -40,7 +45,9 @@
   padding: 2px 6px;
   border-radius: 10px;
   background-color: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
+  // Solid mid-green sampled from the badge gradient (#00ff41 → #008f11),
+  // so the overflow count reads as a quiet accent in the user's green.
+  color: #00c728;
   opacity: 0.85;
 }
 

@@ -1,8 +1,7 @@
 import './ModelSelector.less';
-import { useState } from 'preact/hooks';
+import { useState, useRef, useEffect } from 'preact/hooks';
 import { post } from '../../vscode';
-import { modelConfig, modelList, selectedModel } from '../../state/settings';
-import { processing } from '../../state/session';
+import { modelConfig, modelList, selectedModel, pendingModel } from '../../state/settings';
 
 // Produce a compact label from a full model id for the status-bar chip.
 // e.g. "us.anthropic.claude-opus-4-8[1m]" → "opus-4-8", "claude-sonnet-4-6" → "sonnet-4-6".
@@ -21,9 +20,25 @@ export function ModelSelector() {
   const cfg = modelConfig.value;
   const list = modelList.value;
   const selected = selectedModel.value;
-  const busy = processing.value;
+  const pending = pendingModel.value;
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Close the menu when the user clicks or focuses anything outside it
+  // (e.g. the prompt input). mousedown covers clicks; focusin covers tabbing.
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('focusin', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('focusin', close);
+    };
+  }, [open]);
 
   if (!cfg) {
     post({ type: 'getModelConfig' });
@@ -38,30 +53,33 @@ export function ModelSelector() {
   // model, else the global default, else a prompt.
   const current = selected || cfg?.model || cfg?.globalDefault;
   const label = current ? shortLabel(current) : 'Set model';
-  const title = current
-    ? `Model: ${current} — click to change`
-    : 'No model configured — click to set one';
+  const title = pending
+    ? `Switching to ${pending} on the next turn — click to change`
+    : current
+      ? `Model: ${current} — click to change`
+      : 'No model configured — click to set one';
 
   function choose(value: string) {
     const v = value.trim();
     if (!v) return;
     // In-band switch via the control protocol. Gated on idle: while a turn is
-    // in flight, defer is handled extension-side (apply to next turn).
+    // in flight the switch is deferred extension-side and applied at the next
+    // turn-end — the picker stays open/usable and shows a "next turn" marker.
     post({ type: 'setModelInband', model: v } as any);
     setOpen(false);
     setCustom('');
   }
 
   return (
-    <div class="model-selector-row">
+    <div class="model-selector-row" ref={rootRef}>
       <button
-        class="model-dropdown-btn"
+        class={`model-dropdown-btn${pending ? ' pending' : ''}`}
         type="button"
         onClick={() => setOpen(!open)}
         title={title}
-        disabled={busy}
       >
         <span class="model-dropdown-text">{label}</span>
+        {pending && <span class="model-dropdown-pending" title={`${pending} applies next turn`}>⏱</span>}
         <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2.5l3 3 3-3"></path></svg>
       </button>
 
@@ -71,17 +89,19 @@ export function ModelSelector() {
             <div class="model-picker-empty">No models yet — send a message first to load the list, or type an id below.</div>
           )}
           {list.map((m) => {
-            const isSel = current === m.value;
+            const isPending = pending === m.value;
+            const isSel = !pending && current === m.value;
             return (
               <button
                 key={m.value}
-                class={`model-picker-item${isSel ? ' selected' : ''}`}
+                class={`model-picker-item${isSel ? ' selected' : ''}${isPending ? ' pending' : ''}`}
                 type="button"
                 onClick={() => choose(m.value)}
                 title={m.value}
               >
                 <span class="model-picker-item-label">{m.displayName || m.value}</span>
                 {m.description && <span class="model-picker-item-desc">{m.description}</span>}
+                {isPending && <span class="model-picker-item-pending">next turn</span>}
                 {isSel && <span class="model-picker-item-check">✓</span>}
               </button>
             );

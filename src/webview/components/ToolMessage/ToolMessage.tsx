@@ -1,7 +1,8 @@
-import './ToolMessage.less';
-import { useState } from 'preact/hooks';
-import { ChatMessage } from '../ChatMessage/ChatMessage';
-import { post } from '../../vscode';
+import "./ToolMessage.less";
+import { ChatMessage } from "../ChatMessage/ChatMessage";
+import { CopyButton } from "../CopyButton/CopyButton";
+import { toolCategory } from "./tool_icons";
+import { post } from "../../vscode";
 
 interface ToolUseMessageProps {
   toolName: string;
@@ -9,8 +10,12 @@ interface ToolUseMessageProps {
   rawInput?: any;
 }
 
-function getCopyText(toolName: string, rawInput: any, content: string): string | null {
-  if (toolName === 'Bash' && rawInput?.command) return rawInput.command;
+function getCopyText(
+  toolName: string,
+  rawInput: any,
+  content: string,
+): string | null {
+  if (toolName === "Bash" && rawInput?.command) return rawInput.command;
   if (rawInput?.file_path) return rawInput.file_path;
   if (content) return content;
   return null;
@@ -28,50 +33,50 @@ function toCursorLink(absPath: string): string {
 }
 
 function openFile(filePath: string) {
-  post({ type: 'openFile', filePath } as any);
+  post({ type: "openFile", filePath } as any);
 }
 
-export function ToolUseMessage({ toolName, content, rawInput }: ToolUseMessageProps) {
-  const [copied, setCopied] = useState(false);
+export function ToolUseMessage({
+  toolName,
+  content,
+  rawInput,
+}: ToolUseMessageProps) {
   const copyText = getCopyText(toolName, rawInput, content);
   const filePath = rawInput?.file_path;
   const hasClickablePath = filePath && isAbsolutePath(filePath);
 
-  function handleCopy() {
-    if (!copyText) return;
-    // For an absolute file path, put a clickable cursor:// link on the clipboard
-    // instead of the bare path. Other copies (Bash command, content) stay plain.
-    const clipboardValue = hasClickablePath ? toCursorLink(filePath) : copyText;
-    navigator.clipboard.writeText(clipboardValue).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {
-      post({ type: 'copyToClipboard', text: clipboardValue } as any);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }
+  // For an absolute file path, put a clickable cursor:// link on the clipboard
+  // instead of the bare path. Other copies (Bash command, content) stay plain.
+  const clipboardValue = hasClickablePath ? toCursorLink(filePath) : copyText;
+
+  // File-path tools (Read/Edit/Write) collapse to a single line: the path rides
+  // inline in the header, right-aligned and start-truncated so the filename stays
+  // visible. Other tools (Bash, etc.) keep their multi-line body below the header.
+  const inlinePath = hasClickablePath;
+
+  // Category drives the shared --tool-accent CSS vars (set by cat-<category> on
+  // the message root), which color BOTH the icon gradient and the accent border.
+  const category = toolCategory(toolName);
 
   return (
-    <ChatMessage type="tool" showHeader={false}>
-      <div class="tool-header">
-        <div class="tool-icon">T</div>
+    <ChatMessage type="tool" showHeader={false} accent={category}>
+      <div class={`tool-header${inlinePath ? " tool-header--inline" : ""}`}>
+        <div class="tool-icon" />
         <div class="tool-info">{toolName}</div>
-        {copyText && (
-          <button class="tool-copy-btn" type="button" title="Copy" onClick={handleCopy}>
-            {copied
-              ? <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-              : <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>}
-          </button>
+        {inlinePath && (
+          // The rtl truncation in CSS clips the START of the path (ellipsis on the
+          // left) so the filename stays visible; the path's LTR runs keep order.
+          <span
+            class="tool-file-link tool-file-link--inline"
+            onClick={() => openFile(filePath)}
+            title={filePath}
+          >
+            {filePath}
+          </span>
         )}
+        {copyText && <CopyButton text={clipboardValue || ""} />}
       </div>
-      {content && (
-        <pre class="tool-body">
-          {hasClickablePath ? (
-            <span class="tool-file-link" onClick={() => openFile(filePath)} title="Open in editor">{content}</span>
-          ) : content}
-        </pre>
-      )}
+      {content && !inlinePath && <pre class="tool-body">{content}</pre>}
     </ChatMessage>
   );
 }

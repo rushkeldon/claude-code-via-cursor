@@ -14,7 +14,7 @@
   padding: 4px 10px;
   background: none;
   border: 1px solid var(--vscode-panel-border);
-  border-radius: 20px;
+  border-radius: 4px;
   color: var(--vscode-foreground);
   font-size: 10px;
   font-weight: 500;
@@ -32,11 +32,21 @@
     border-color: var(--vscode-focusBorder);
   }
 
+  &.pending {
+    border-color: var(--vscode-charts-orange, #ff9500);
+  }
+
   svg {
     color: var(--vscode-descriptionForeground);
     width: 8px;
     height: 8px;
   }
+}
+
+.model-dropdown-pending {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--vscode-charts-orange, #ff9500);
 }
 
 .model-picker {
@@ -100,6 +110,17 @@
     &-check {
       font-size: 12px;
       color: #fff;
+    }
+
+    &-pending {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--vscode-charts-orange, #ff9500);
+      white-space: nowrap;
+    }
+
+    &.pending &-label {
+      color: var(--vscode-charts-orange, #ff9500);
     }
   }
 

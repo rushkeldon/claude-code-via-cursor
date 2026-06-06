@@ -3,6 +3,7 @@ import { signal } from '@preact/signals';
 import { useRef, useLayoutEffect } from 'preact/hooks';
 import { on } from '../../vscode';
 import { messages } from '../../state/messages';
+import { thoughtsOn } from '../../state/settings';
 
 export const thinkingText = signal('');
 const thinkingStartMs = signal(0);
@@ -10,6 +11,21 @@ export const thinkingActive = signal(false);
 const thinkingCollapsing = signal(false);
 let streamedThisTurn = false;
 let collapseTimeout: number | undefined;
+
+// Drives the live "thought for Ns" timer in the always-on bubble. Ticks only
+// while a thinking block is active; referenced in the pane render so the elapsed
+// label re-renders. The bubble + timer show on every turn even with zero thought
+// text — that's the post-Send activity affordance ("something is happening").
+const nowTick = signal(0);
+let tickInterval: number | undefined;
+function startTick() {
+  if (tickInterval) return;
+  nowTick.value = Date.now();
+  tickInterval = window.setInterval(() => { nowTick.value = Date.now(); }, 200);
+}
+function stopTick() {
+  if (tickInterval) { clearInterval(tickInterval); tickInterval = undefined; }
+}
 
 // Keep in sync with ThinkingPane.less: @thinking-collapse-delay + @thinking-collapse-duration.
 // Small buffer so the JS unmount lands AFTER the CSS transition completes —
@@ -34,6 +50,7 @@ on('thinkingBlockStart', () => {
     thinkingStartMs.value = Date.now();
     thinkingActive.value = true;
     thinkingCollapsing.value = false;
+    startTick();
   }
 });
 
@@ -48,6 +65,7 @@ on('thinkingDelta', (msg) => {
     thinkingStartMs.value = Date.now();
     thinkingActive.value = true;
     thinkingCollapsing.value = false;
+    startTick();
   }
   thinkingText.value = thinkingText.value + msg.data;
 });
@@ -61,6 +79,7 @@ on('thinking', (msg) => {
     thinkingStartMs.value = Date.now();
     thinkingActive.value = true;
     thinkingCollapsing.value = false;
+    startTick();
   }
   if (thinkingText.value.trim()) {
     thinkingText.value = thinkingText.value + '\n\n' + msg.data.trim();
@@ -70,9 +89,28 @@ on('thinking', (msg) => {
 });
 
 function commitToPill() {
+  stopTick();
   const content = thinkingText.value;
+  const elapsedMs = Date.now() - thinkingStartMs.value;
+  const elapsedLabel = elapsedMs < 1000
+    ? `${elapsedMs}ms`
+    : `${(elapsedMs / 1000).toFixed(1)}s`;
+
   if (!content.trim()) {
-    // Nothing meaningful to commit — just reset.
+    // No thought text this turn. If the user asked to see thoughts (On) but none
+    // arrived (e.g. Bedrock-4.8 doesn't honor the display flag), leave a
+    // timer-only pill with an honest note so the empty toggle reads as
+    // informative, not broken. If thoughts are Off, just reset — the live bubble
+    // already gave feedback during the turn.
+    if (thoughtsOn.value) {
+      messages.value = [...messages.value, {
+        role: 'thinking',
+        content: '',
+        elapsedLabel,
+        noThoughts: true,
+        timestamp: Date.now(),
+      }];
+    }
     thinkingText.value = '';
     thinkingActive.value = false;
     thinkingCollapsing.value = false;
@@ -84,10 +122,6 @@ function commitToPill() {
   //    correct order relative to the assistant output that triggered the
   //    flush. The pill is what the user can later expand/collapse to revisit
   //    the thought.
-  const elapsedMs = Date.now() - thinkingStartMs.value;
-  const elapsedLabel = elapsedMs < 1000
-    ? `${elapsedMs}ms`
-    : `${(elapsedMs / 1000).toFixed(1)}s`;
   messages.value = [...messages.value, {
     role: 'thinking',
     content,
@@ -136,6 +170,7 @@ on('userInput', () => {
 
 on('ready', () => {
   cancelPendingCollapse();
+  stopTick();
   thinkingText.value = '';
   thinkingActive.value = false;
   thinkingCollapsing.value = false;
@@ -143,10 +178,9 @@ on('ready', () => {
 });
 
 export function ActiveThinkingPane() {
-  // Stay mounted as long as there is text to show — even after
-  // `thinkingActive` flips false during the collapse animation, so the CSS
-  // transition has an element to animate.
-  if (!thinkingText.value) return null;
+  // Always-on affordance: stay mounted while a thinking block is active (even
+  // with zero thought text — bubble + live timer) and while text is collapsing.
+  if (!thinkingActive.value && !thinkingText.value) return null;
 
   const paneRef = useRef<HTMLDivElement>(null);
 
@@ -170,10 +204,15 @@ export function ActiveThinkingPane() {
     }
   }, [thinkingCollapsing.value]);
 
+  const active = thinkingActive.value;
+  // While active, reference nowTick so the timer re-renders every tick.
+  const elapsedMs = (active ? nowTick.value : Date.now()) - thinkingStartMs.value;
+  const secs = (Math.max(0, elapsedMs) / 1000).toFixed(1);
+
   return (
     <div class="thinking-live" ref={paneRef}>
-      <div class="thinking-header">💭 Thinking…</div>
-      <div class="thinking-content">{thinkingText.value}</div>
+      <div class="thinking-header">💭 Thinking… <span class="thinking-timer">{secs}s</span></div>
+      {thinkingText.value && <div class="thinking-content">{thinkingText.value}</div>}
     </div>
   );
 }

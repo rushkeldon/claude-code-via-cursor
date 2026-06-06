@@ -2,7 +2,7 @@ declare function acquireVsCodeApi(): { postMessage(msg: any): void };
 const vscode = acquireVsCodeApi();
 
 export type MessageToExtension =
-  | { type: 'sendMessage'; text: string; planMode: boolean; thinkingMode: boolean; images?: Array<{ filePath: string; previewUri: string }> }
+  | { type: 'sendMessage'; text: string; planMode: boolean; images?: Array<{ filePath: string; previewUri: string }> }
   | { type: 'webviewReady' }
   | { type: 'firstRunShown' }
   | { type: 'getDetectedTerminals' }
@@ -16,11 +16,14 @@ export type MessageToExtension =
   | { type: 'addPermission'; toolName: string; command: string | null }
   | { type: 'removePermission'; toolName: string; command: string | null }
   | { type: 'permissionResponse'; id: string; approved: boolean; alwaysAllow?: boolean }
-  | { type: 'askUserQuestionResponse'; id: string; answers: Record<string, string> }
+  | { type: 'askUserQuestionResponse'; id: string; answers: Record<string, string>; cancelled?: boolean }
   | { type: 'setModel'; model: string }
   | { type: 'setModelInband'; model: string }
   | { type: 'getModelConfig' }
   | { type: 'getModelList' }
+  | { type: 'setThoughtsDisplay'; on: boolean }
+  | { type: 'setEffort'; level: string }
+  | { type: 'getThoughtControlConfig' }
   | { type: 'stop' }
   | { type: 'skull' }
   | { type: 'sendNow' }
@@ -45,11 +48,10 @@ export type MessageFromExtension =
   | { type: 'authError'; data: { rawError: string } }
   | { type: 'processStalled'; data: { sinceLastMs: number } }
   | { type: 'stallHintClear' }
-  | { type: 'modelSwitching'; data: { model: string } }
-  | { type: 'modelFull'; data: { configured?: string; resolvedEnv?: string } }
   | { type: 'modelConfig'; data: { model?: string; globalDefault?: string; needsFirstRun: boolean } }
-  | { type: 'modelList'; data: { models: Array<{ value: string; displayName?: string; description?: string }>; selected?: string } }
-  | { type: 'modelSet'; data: { model: string; ok: boolean; error?: string } }
+  | { type: 'modelList'; data: { models: Array<{ value: string; displayName?: string; description?: string; supportedEffortLevels?: string[]; supportsAdaptiveThinking?: boolean; supportsEffort?: boolean }>; selected?: string } }
+  | { type: 'modelSet'; data: { model: string; ok: boolean; error?: string; deferred?: boolean } }
+  | { type: 'thoughtControlConfig'; data: { thoughtsOn: boolean; effort?: string } }
   | { type: 'sessionParked'; data: { sessionId?: string } }
   | { type: 'sessionLocked'; data: { sessionId?: string; lockedBy?: number } }
   | { type: 'lockedSessions'; data: { sessionIds: string[] } }
@@ -63,7 +65,7 @@ export type MessageFromExtension =
   | { type: 'askUserQuestion'; data: { id: string; questions: any[]; status: string; answers?: Record<string, string> } }
   | { type: 'updateAskUserQuestionStatus'; data: { id: string; status: string; answers: Record<string, string> | null } }
   | { type: 'queueState'; data: { items: Array<{ id: string; preview: string; hasImages: boolean }> } }
-  | { type: 'queuedDemoted'; data: { message: string; planMode: boolean; thinkingMode: boolean; images: Array<{ filePath: string; previewUri?: string }> } }
+  | { type: 'queuedDemoted'; data: { message: string; planMode: boolean; images: Array<{ filePath: string; previewUri?: string }> } }
 
 export function post(msg: MessageToExtension): void {
   vscode.postMessage(msg);

@@ -1,7 +1,6 @@
 import './SessionStatus.less';
 import { signal, computed } from '@preact/signals';
-import { on, post } from '../../vscode';
-import { processing, resolvedModel, modelFull } from '../../state/session';
+import { on } from '../../vscode';
 import { tokenState } from '../../state/tokens';
 
 type StatusState = 'ready' | 'processing' | 'error' | 'disconnected';
@@ -80,49 +79,13 @@ const displayText = computed(() => {
   return parts.join(' • ');
 });
 
-// Lines for the hover tooltip over the model name. Shows the full provider string.
-// When the configured default and the runtime env override disagree, both are
-// surfaced (labeled) so the tooltip never misrepresents what's actually serving.
-const tooltipLines = computed<{ label?: string; value: string }[]>(() => {
-  const { configured, resolvedEnv } = modelFull.value;
-  const short = resolvedModel.value;
-
-  if (configured && resolvedEnv && configured !== resolvedEnv) {
-    return [
-      { label: 'configured', value: configured },
-      { label: 'running', value: resolvedEnv },
-    ];
-  }
-
-  const full = configured || resolvedEnv;
-  // Only worth a tooltip if there's more than the short label already shows.
-  if (full && full !== short) {
-    return [{ value: full }];
-  }
-  return [];
-});
-
 export function SessionStatus() {
   const state = statusState.value;
-  const lines = tooltipLines.value;
 
   return (
     <div class={`session-status ${state}`}>
       <div class="session-status-indicator"></div>
       <div class="session-status-text">{displayText.value}</div>
-      <div class="session-status-model">
-        <span class="session-status-model-label">{resolvedModel.value}</span>
-        {lines.length > 0 && (
-          <div class="session-status-model-tooltip">
-            {lines.map(l => (
-              <div class="session-status-model-tooltip-line">
-                {l.label && <span class="session-status-model-tooltip-label">{l.label}: </span>}
-                {l.value}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

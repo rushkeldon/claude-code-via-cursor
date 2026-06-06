@@ -2,7 +2,7 @@
   "name": "claude-code-via-cursor",
   "displayName": "Claude Code via Cursor",
   "description": "Personal fork of Claude Code Chat with the OpenCredits integration removed. Routes only to your local Claude Code.",
-  "version": "3.0.0-appcloud9.75",
+  "version": "3.0.0-appcloud9.101",
   "publisher": "appcloud9",
   "author": "Keldon Rush (appcloud9.com)",
   "repository": {
@@ -173,16 +173,20 @@
           "default": "/usr/local/bin/claude",
           "description": "Path to Claude executable in the WSL distribution"
         },
-        "claudeCodeChat.thinking.intensity": {
+        "claudeCodeChat.thinking.show": {
+          "type": "boolean",
+          "default": true,
+          "description": "Default for whether Claude's summarized thoughts are shown (the Thoughts toggle in the prompt pane). Per-session changes from the toggle take precedence."
+        },
+        "claudeCodeChat.thinking.effort": {
           "type": "string",
-          "enum": [
-            "think",
-            "think-hard",
-            "think-harder",
-            "ultrathink"
-          ],
-          "default": "think",
-          "description": "Thinking mode intensity level. Higher levels provide more detailed reasoning but consume more tokens."
+          "default": "",
+          "description": "Default thinking effort/depth (e.g. low, medium, high, xhigh, max). Empty inherits the model's default. Per-session changes from the Effort picker take precedence; available levels are per-model."
+        },
+        "claudeCodeChat.autoContinue": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically nudge a turn that stops producing output without finishing (a dropped turn) with one invisible 'continue' after ~60s of silence. Disable if it ever derails turns. The stall hint and hard-kill backstop are unaffected."
         },
         "claudeCodeChat.permissions.yoloMode": {
           "type": "boolean",

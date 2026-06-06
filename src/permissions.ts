@@ -217,8 +217,8 @@ export function handleAskUserQuestion(requestId: string, input: Record<string, u
 	log.debug('Permissions', 'exit handleAskUserQuestion', { requestId, questionCount: questions.length }, '⬅️');
 }
 
-export function handleAskUserQuestionResponse(requestId: string, answers: Record<string, string>): void {
-	log.debug('Permissions', 'enter handleAskUserQuestionResponse', { requestId, answerCount: Object.keys(answers).length }, '➡️');
+export function handleAskUserQuestionResponse(requestId: string, answers: Record<string, string>, cancelled?: boolean): void {
+	log.debug('Permissions', 'enter handleAskUserQuestionResponse', { requestId, answerCount: Object.keys(answers).length, cancelled: !!cancelled }, '➡️');
 	const pendingRequest = pendingPermissionRequests.get(requestId);
 	if (!pendingRequest) {
 		log.warn('Permissions', 'no pending AskUserQuestion request found', { requestId }, '🚫');
@@ -232,30 +232,48 @@ export function handleAskUserQuestionResponse(requestId: string, answers: Record
 		return;
 	}
 
-	const response = {
-		type: 'control_response',
-		response: {
-			subtype: 'success',
-			request_id: requestId,
+	// When the user clicks Cancel, decline the question via the same deny
+	// control-response that permission denials use — tells the CLI the user
+	// opted out rather than supplying answers.
+	const response = cancelled
+		? {
+			type: 'control_response',
 			response: {
-				behavior: 'allow',
-				updatedInput: {
-					questions: (pendingRequest.input as any).questions,
-					answers: answers
-				},
-				toolUseID: pendingRequest.toolUseId
+				subtype: 'success',
+				request_id: requestId,
+				response: {
+					behavior: 'deny',
+					message: 'User declined to answer',
+					interrupt: true,
+					toolUseID: pendingRequest.toolUseId
+				}
 			}
 		}
-	};
+		: {
+			type: 'control_response',
+			response: {
+				subtype: 'success',
+				request_id: requestId,
+				response: {
+					behavior: 'allow',
+					updatedInput: {
+						questions: (pendingRequest.input as any).questions,
+						answers: answers
+					},
+					toolUseID: pendingRequest.toolUseId
+				}
+			}
+		};
 
 	const responseJson = JSON.stringify(response) + '\n';
 	deps.writeToStdin(responseJson);
 
+	const finalStatus = cancelled ? 'cancelled' : 'answered';
 	const savedMsg = conversation.getCurrentConversation().find(
 		m => m.messageType === 'askUserQuestion' && m.data?.id === requestId
 	);
 	if (savedMsg) {
-		savedMsg.data = { ...savedMsg.data, status: 'answered', answers: answers };
+		savedMsg.data = { ...savedMsg.data, status: finalStatus, answers: answers };
 		void conversation.saveCurrentConversation();
 	}
 
@@ -263,11 +281,11 @@ export function handleAskUserQuestionResponse(requestId: string, answers: Record
 		type: 'updateAskUserQuestionStatus',
 		data: {
 			id: requestId,
-			status: 'answered',
+			status: finalStatus,
 			answers: answers
 		}
 	});
-	log.debug('Permissions', 'exit handleAskUserQuestionResponse', { requestId }, '⬅️');
+	log.debug('Permissions', 'exit handleAskUserQuestionResponse', { requestId, cancelled: !!cancelled }, '⬅️');
 }
 
 export function cancelPendingPermissionRequests(): void {

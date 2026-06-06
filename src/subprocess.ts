@@ -39,6 +39,10 @@ let isProcessing: boolean | undefined;
 // with. Plan mode is a spawn-time arg, so toggling it between turns forces a
 // respawn (with --resume) rather than a reuse.
 let spawnedPlanMode: boolean | undefined;
+// Signature of the thinking prefs (effort/thoughts) the live process was spawned
+// with. These ride in spawn-time --settings, so changing them forces a respawn
+// (with --resume) on the next turn. Model is excluded — it switches in-band.
+let spawnedThinkingSig: string | undefined;
 // Turns that arrived while a turn was already in flight; flushed at turn end.
 // Each entry carries a stable `id` (monotonic counter) so the UI can target a
 // specific queued item for cancel without ambiguity.
@@ -46,15 +50,14 @@ let queuedTurns: Array<{
 	id: string;
 	message: string;
 	planMode?: boolean;
-	thinkingMode?: boolean;
 	images?: Array<string | { filePath: string; previewUri?: string }>;
 }> = [];
 let queueSeq = 0;
 
 // Emit the current queue to the webview. Called at every queuedTurns mutation
 // (enqueue / drain / cancel / clear) so the peeking QueuedPrompt card stays in
-// sync. preview is the first ~80 chars; hasImages flags an attachment. Exported
-// so the webview can resync on (re)mount via webviewReady.
+// sync. preview is a generous slice (CSS ellipsizes it to fit); hasImages flags
+// an attachment. Exported so the webview can resync on (re)mount via webviewReady.
 export function emitQueueState(): void {
 	if (!deps) { return; }
 	deps.postMessage({
@@ -62,7 +65,11 @@ export function emitQueueState(): void {
 		data: {
 			items: queuedTurns.map(t => ({
 				id: t.id,
-				preview: (t.message || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+				// Send a generous slice (not a tight 80) so the queued-prompt card's
+				// CSS handles the visible truncation with a real ellipsis at whatever
+				// the pane width is. The cap just bounds the payload, it's not the
+				// display length — .queued-prompt-text clips + ellipsizes via flex.
+				preview: (t.message || '').replace(/\s+/g, ' ').trim().slice(0, 200),
 				hasImages: !!t.images?.length,
 			})),
 		},
@@ -74,6 +81,12 @@ export function emitQueueState(): void {
 // per turn — the stream is continuous across turns on one process.
 let rawOutput = '';
 let errorOutput = '';
+// The CLI's `total_cost_usd` on each `result` is CUMULATIVE for the life of the
+// warm process, not the cost of one turn. We bill the per-turn DELTA against this
+// baseline (see the result handler), and reset it to 0 on every spawn because a
+// fresh process restarts its cumulative at ~0. Without the delta, adding the raw
+// cumulative every turn compounds the cost quadratically (the $418-vs-$80 bug).
+let lastProcessCumulativeCost = 0;
 let authErrorFired = false;
 
 // ── Stall watchdog (module-scoped; armed only during an active turn) ───────
@@ -85,7 +98,28 @@ let lastStdoutMs = 0;
 let stallNotified = false;
 let stallKilled = false;
 const STALL_NOTIFY_MS = 30_000;
+const STALL_AUTOCONTINUE_MS = 60_000;
 const STALL_KILL_MS = 120_000;
+
+// ── Auto-continue (dropped-turn recovery) state ────────────────────────────
+// A turn can stop producing output without ever emitting a terminal `result`
+// (the stream goes quiet mid-turn). When that happens we inject ONE invisible
+// "Continue from where you left off." to nudge the turn back to life, capped so
+// we never loop. These are per-turn and reset at turn start / onTurnEnd.
+const AUTO_CONTINUE_MAX = 1;
+let autoContinueCount = 0;
+// True while a tool_use has been seen but its tool_result hasn't arrived — the
+// claude stream is legitimately silent during a long bash/web call, so the 60s
+// auto-continue is suppressed (the 120s kill still applies — a wedged tool is
+// worth killing).
+let toolInFlight = false;
+// True when the most recent `result` ended on a genuine error (is_error / auth /
+// refusal). We must NOT auto-continue a known-bad end — that would re-trigger the
+// same failure in a loop.
+let lastResultWasError = false;
+// True once we've shown the "stalled, couldn't recover" escalation card for the
+// current turn, so it's surfaced at most once. Reset with the other per-turn state.
+let autoContinueEscalated = false;
 
 // ── Outbound control protocol ─────────────────────────────────────────────
 // We send control_requests (initialize, set_model, interrupt, …) to the live
@@ -128,6 +162,33 @@ export function init(d: SubprocessDeps): void {
 
 let silentQueryCallback: ((text: string) => void) | null = null;
 let userRequestedStop = false;
+
+// Set when the user deliberately pauses the current session by navigating away —
+// clicking + (new session) or resuming a different conversation from History.
+// Both tear down the live process via killProcess(), which aborts the in-flight
+// turn and fires proc.on('error') with "The operation was aborted". That abort is
+// expected, not a failure, so when this flag is set we render a friendly yellow
+// notice instead of the red error card, then clear it. Mirrors userRequestedStop.
+let userPausedSession: { reason: 'new-session' | 'history' } | null = null;
+
+export function markUserPaused(reason: 'new-session' | 'history'): void {
+	userPausedSession = { reason };
+}
+
+// True while a deliberate respawn is in progress (plan-mode toggle, thinking
+// signature change, etc.). killProcess() will fire proc.on('error') with an
+// AbortError — that's expected, not a failure, so the error handler swallows it
+// silently when this flag is set. Cleared once the new process spawns. Mirrors
+// userPausedSession but for "we're tearing this down on purpose to replace it"
+// rather than "the user navigated away."
+let respawnInProgress = false;
+
+// True when an error is the result of an aborted operation (the signal raised by
+// killProcess → abortController.abort()), so we can distinguish a deliberate
+// pause from a genuine spawn/runtime failure.
+function isAbortError(error: Error): boolean {
+	return /aborted/i.test(error.message) || (error as any)?.name === 'AbortError';
+}
 
 // True from when a silent query is written to stdin until its `result` event
 // reaches onTurnEnd. The silentQueryCallback fires earlier (on the assistant
@@ -180,6 +241,43 @@ export function flushPendingSilentQuery(): void {
 		pendingSilentQuery = null;
 		sendSilentQuery(message, callback);
 	}
+}
+
+// Whether the dropped-turn auto-continue is enabled (setting, default on).
+function autoContinueEnabled(): boolean {
+	try {
+		return vscode.workspace
+			.getConfiguration('claudeCodeChat')
+			.get<boolean>('autoContinue', true);
+	} catch {
+		return true;
+	}
+}
+
+// Invisible recovery nudge for a dropped turn (see the stall watchdog). The turn
+// went quiet mid-stream without a terminal `result`; write one "continue" user
+// message straight to stdin to resume it. Deliberately does NOT reuse
+// sendSilentQuery (which early-returns while isProcessing and routes through the
+// awaitingSilentResult guard) and does NOT touch isProcessing / the queue / the
+// UX — the original turn is still in flight; we're resuming it, not starting a new
+// one. Re-arms the watchdog so the resumed turn gets a fresh silence window; the
+// autoContinueCount cap (incremented by the caller) prevents looping.
+function injectContinue(): void {
+	if (!currentClaudeProcess?.stdin) { return; }
+	const userMessage = {
+		type: 'user',
+		session_id: conversation.getCurrentSessionId() || '',
+		message: { role: 'user', content: [{ type: 'text', text: 'Continue from where you left off.' }] },
+		parent_tool_use_id: null
+	};
+	currentClaudeProcess.stdin.write(JSON.stringify(userMessage) + '\n');
+	log.info('Subprocess', 'auto-continue nudge injected', undefined, '↩️');
+	// Drop the "still working" hint and give the resumed turn a fresh window.
+	if (stallNotified) {
+		stallNotified = false;
+		deps?.postMessage({ type: 'stallHintClear' });
+	}
+	armStallWatchdog();
 }
 
 export function getProcess(): cp.ChildProcess | undefined {
@@ -269,14 +367,13 @@ function rejectAllPendingControl(reason: string): void {
 // if a turn is already in flight we queue the message and flush it at turn end
 // (onTurnEnd) — we never spawn a second child. Otherwise we run the turn,
 // reusing the warm process if one exists (or spawning lazily if not).
-export async function sendMessage(message: string, planMode?: boolean, thinkingMode?: boolean, images?: Array<string | { filePath: string; previewUri?: string }>): Promise<void> {
+export async function sendMessage(message: string, planMode?: boolean, images?: Array<string | { filePath: string; previewUri?: string }>): Promise<void> {
 	if (!deps) { return; }
 
 	log.info('ClaudeProcess', 'sendMessage', {
 		textLen: message?.length,
 		text: message,
 		planMode: !!planMode,
-		thinkingMode: !!thinkingMode,
 		imageCount: images?.length ?? 0,
 		model: settings.getSelectedModel(),
 		session: conversation.getCurrentSessionId(),
@@ -286,51 +383,30 @@ export async function sendMessage(message: string, planMode?: boolean, thinkingM
 
 	if (isProcessing) {
 		// A turn is already in flight — queue rather than spawn a second child.
-		queuedTurns.push({ id: `q-${++queueSeq}`, message, planMode, thinkingMode, images });
+		queuedTurns.push({ id: `q-${++queueSeq}`, message, planMode, images });
 		log.info('ClaudeProcess', 'turn queued (turn in flight)', { queueLen: queuedTurns.length }, '⏸️');
 		emitQueueState();
 		return;
 	}
 
-	await runTurn({ message, planMode, thinkingMode, images });
+	await runTurn({ message, planMode, images });
 }
 
 interface Turn {
 	message: string;
 	planMode?: boolean;
-	thinkingMode?: boolean;
 	images?: Array<string | { filePath: string; previewUri?: string }>;
 }
 
 async function runTurn(turn: Turn): Promise<void> {
 	if (!deps) { return; }
-	const { message, planMode, thinkingMode, images } = turn;
+	const { message, planMode, images } = turn;
 
-	const configThink = vscode.workspace.getConfiguration('claudeCodeChat');
-	const thinkingIntensity = configThink.get<string>('thinking.intensity', 'think');
-
-	let actualMessage = message;
-	if (thinkingMode) {
-		let thinkingPrompt = '';
-		const thinkingMesssage = ' THROUGH THIS STEP BY STEP: \n'
-		switch (thinkingIntensity) {
-			case 'think':
-				thinkingPrompt = 'THINK';
-				break;
-			case 'think-hard':
-				thinkingPrompt = 'THINK HARD';
-				break;
-			case 'think-harder':
-				thinkingPrompt = 'THINK HARDER';
-				break;
-			case 'ultrathink':
-				thinkingPrompt = 'ULTRATHINK';
-				break;
-			default:
-				thinkingPrompt = 'THINK';
-		}
-		actualMessage = thinkingPrompt + thinkingMesssage + actualMessage;
-	}
+	// Thinking depth/visibility is controlled by the Effort/Thoughts pickers via
+	// launch-injected --settings — not by prompt-prefix magic words. (The old
+	// THINK/ULTRATHINK prefix only steered legacy models and did nothing on Opus
+	// 4.6+; effort is the real dial now.)
+	const actualMessage = message;
 
 	isProcessing = true;
 
@@ -365,7 +441,9 @@ async function runTurn(turn: Turn): Promise<void> {
 	// arg, so toggling it requires a fresh process — resumed via --resume).
 	const stdinUsable = !!currentClaudeProcess?.stdin && !currentClaudeProcess.stdin.destroyed;
 	const planModeChanged = !!planMode !== !!spawnedPlanMode;
-	const needSpawn = !currentClaudeProcess || !stdinUsable || planModeChanged;
+	// Effort/Thoughts changed since spawn → respawn to re-inject --settings.
+	const thinkingChanged = !!currentClaudeProcess && spawnedThinkingSig !== settings.getThinkingSig();
+	const needSpawn = !currentClaudeProcess || !stdinUsable || planModeChanged || thinkingChanged;
 
 	if (needSpawn) {
 		if (currentClaudeProcess) {
@@ -373,14 +451,21 @@ async function runTurn(turn: Turn): Promise<void> {
 			// we never have two children attached to the same session at once.
 			// killProcess() clears queuedTurns (correct for an explicit stop), but
 			// here we're mid-drain — preserve any turns still waiting behind this one.
-			log.info('ClaudeProcess', 'respawn required', { planModeChanged, stdinUsable }, '♻️');
+			log.info('ClaudeProcess', 'respawn required', { planModeChanged, thinkingChanged, stdinUsable }, '♻️');
 			const preserved = queuedTurns;
+			// Mark the abort that killProcess() is about to raise as expected, so
+			// proc.on('error') swallows it silently instead of painting a red card.
+			respawnInProgress = true;
 			await killProcess();
 			queuedTurns = preserved;
 		}
 		const ok = await spawnProcess(!!planMode);
 		if (!ok) {
 			// Synchronous spawn failure — don't leave the turn stuck "processing".
+			// Also clear the respawn flag so a real future error isn't silently
+			// swallowed (the success path clears it inside spawnProcess; this is
+			// the failure-path counterpart).
+			respawnInProgress = false;
 			isProcessing = false;
 			disarmStallWatchdog();
 			deps.postMessage({ type: 'setProcessing', data: { isProcessing: false } });
@@ -399,6 +484,12 @@ async function runTurn(turn: Turn): Promise<void> {
 		deps.postMessage({ type: 'setProcessing', data: { isProcessing: false } });
 		return;
 	}
+	// Fresh turn → reset the per-turn auto-continue state (a prior turn's error or
+	// spent nudge must not carry over and block/skew recovery for this one).
+	autoContinueCount = 0;
+	autoContinueEscalated = false;
+	toolInFlight = false;
+	lastResultWasError = false;
 	armStallWatchdog();
 }
 
@@ -444,11 +535,21 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		args.push('--permission-mode', 'plan');
 	}
 
-	// Intentionally NOT passing --model. The extension manages the model by
-	// writing to .claude/settings.local.json (see settings.ts), letting the CLI
-	// resolve it through its own settings hierarchy (project settings.local.json
-	// → global settings.json). Passing --model here would override the user's
-	// configured model (e.g. forcing Opus 4.6 over their pinned opus-4-8[1m]).
+	// Launch-injection from extension-owned storage (build-to-contract). --model
+	// overrides settings.local.json; --settings injects the advertised thinking
+	// keys (gated on the selected model's capabilities). We write NOTHING to the
+	// dev's settings.local.json — it stays for "Claude Code in the wild". On every
+	// respawn this re-applies the same prefs, so an in-band model switch is never
+	// reverted (the model-revert bug). 'default' is the account default sentinel —
+	// don't pass --model for it (let the CLI resolve the configured default).
+	const injectedModel = settings.getSelectedModel();
+	if (injectedModel && injectedModel !== 'default') {
+		args.push('--model', injectedModel);
+	}
+	const thinkingSettings = settings.buildThinkingSettingsArg(getCachedModels(), injectedModel);
+	if (thinkingSettings) {
+		args.push('--settings', thinkingSettings);
+	}
 
 	// --resume ONLY at spawn, and only when resuming an existing session. A
 	// brand-new session spawns without --resume; the CLI mints the id and we
@@ -526,12 +627,20 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 
 	currentClaudeProcess = claudeProcess;
 	spawnedPlanMode = planMode;
+	spawnedThinkingSig = settings.getThinkingSig();
 
 	// Reset per-process accumulators (the stream is continuous across turns on
 	// this process; these belong to the process, not the turn).
 	rawOutput = '';
 	errorOutput = '';
 	authErrorFired = false;
+	// Fresh process → its total_cost_usd restarts at ~0, so the cost-delta
+	// baseline must restart too (else the first result computes a bogus delta
+	// against the prior process's final cumulative).
+	lastProcessCumulativeCost = 0;
+	// New process is live — the deliberate-respawn abort window is closed; a real
+	// future error from this proc must not be silently swallowed.
+	respawnInProgress = false;
 
 	log.info('ClaudeProcess', 'spawned', { pid: claudeProcess.pid, planMode, resumed: !!sessionId }, '🚀');
 
@@ -668,6 +777,15 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 	});
 
 	proc.on('error', (error) => {
+		// Deliberate respawn (plan-mode toggle, thinking-pref change): the abort
+		// killProcess() raises is expected, not a failure. Swallow it before any
+		// state teardown so the user never sees the red card AND the live spawn
+		// already in flight isn't disturbed (its identity is the new process).
+		if (respawnInProgress && isAbortError(error)) {
+			log.debug('Subprocess', 'expected abort during respawn — suppressing', { error: error.message }, '🤫');
+			return;
+		}
+
 		log.error('Subprocess', 'claude process error', { error: error.message }, '💥');
 
 		// Identity guard: ignore errors from a process that is no longer live.
@@ -709,6 +827,21 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 			});
 		} else if (userRequestedStop) {
 			userRequestedStop = false;
+		} else if (userPausedSession && isAbortError(error)) {
+			// The user deliberately paused this session (+ / History). The abort is
+			// expected — show a friendly yellow notice instead of the red error card.
+			const reason = userPausedSession.reason;
+			userPausedSession = null;
+			conversation.sendAndSaveMessage({
+				type: 'notice',
+				data: {
+					title: 'Session paused',
+					content: reason === 'history'
+						? 'Session paused — switched conversations.'
+						: 'Session paused — started a new session.',
+					variant: 'warning'
+				}
+			});
 		} else {
 			conversation.sendAndSaveMessage({
 				type: 'error',
@@ -785,8 +918,11 @@ export async function setModel(model: string): Promise<void> {
 		return;
 	}
 	if (isProcessing) {
-		// Defer to the next idle boundary (applied in onTurnEnd).
+		// Defer to the next idle boundary (applied in onTurnEnd). Tell the UI so
+		// the picker can show a "applies next turn" marker instead of silently
+		// doing nothing.
 		pendingModelSwitch = model;
+		deps.postMessage({ type: 'modelSet', data: { model, ok: true, deferred: true } });
 		log.info('Subprocess', 'setModel deferred (turn in flight)', { model }, '⏸️');
 		return;
 	}
@@ -896,6 +1032,11 @@ function armStallWatchdog(): void {
 	stallNotified = false;
 	stallKilled = false;
 	stallTimer = setInterval(() => {
+		// NOTE: per-turn auto-continue state (autoContinueCount, toolInFlight,
+		// lastResultWasError) is reset at turn start in runTurn() and on a real
+		// result in onTurnEnd() — NOT here, because armStallWatchdog is also called
+		// by injectContinue() to give a resumed turn a fresh silence window, and
+		// resetting the count there would defeat the cap.
 		if (!deps || !currentClaudeProcess || authErrorFired || stallKilled) {
 			disarmStallWatchdog();
 			return;
@@ -915,6 +1056,47 @@ function armStallWatchdog(): void {
 			deps.postMessage({
 				type: 'processStalled',
 				data: { sinceLastMs: silentFor }
+			});
+		}
+		// Auto-continue stage (60s): the turn went quiet mid-stream without a
+		// terminal `result`. Inject ONE invisible "continue" nudge to recover a
+		// dropped turn — but only when it's safe to: feature enabled, a turn is
+		// actually in flight, not waiting on a tool, the last result wasn't a real
+		// error, the user didn't just Stop, and we haven't already used the cap.
+		if (
+			silentFor > STALL_AUTOCONTINUE_MS &&
+			autoContinueEnabled() &&
+			isProcessing &&
+			!toolInFlight &&
+			!lastResultWasError &&
+			!userRequestedStop &&
+			autoContinueCount < AUTO_CONTINUE_MAX
+		) {
+			autoContinueCount++;
+			log.warn('StallWatchdog', 'auto-continue firing', { silentFor, attempt: autoContinueCount }, '↩️');
+			injectContinue();   // writes the nudge to stdin + re-arms (fresh window)
+			return;
+		}
+		// Escalation: we already spent the auto-continue cap and the turn STILL went
+		// quiet past the auto-continue window — surface a visible card once so the
+		// user isn't left silently stuck (the 120s kill remains the final backstop).
+		if (
+			silentFor > STALL_AUTOCONTINUE_MS &&
+			autoContinueCount >= AUTO_CONTINUE_MAX &&
+			!autoContinueEscalated &&
+			autoContinueEnabled() &&
+			!toolInFlight &&
+			!lastResultWasError
+		) {
+			autoContinueEscalated = true;
+			log.warn('StallWatchdog', 'auto-continue cap exhausted — escalating', { silentFor }, '⚠️');
+			conversation.sendAndSaveMessage({
+				type: 'notice',
+				data: {
+					title: 'Turn stalled',
+					content: 'The turn went quiet and an automatic nudge didn\'t recover it. The session is still active — send a message to continue, or Stop to reset.',
+					variant: 'warning'
+				}
 			});
 		}
 		if (silentFor > STALL_KILL_MS) {
@@ -958,8 +1140,23 @@ function onTurnEnd(): void {
 		return;
 	}
 
+	// A turn completed normally, so any pending pause flag is stale (the abort
+	// path didn't claim it). Clear it so it can't downgrade a genuine abort later.
+	userPausedSession = null;
+
 	isProcessing = false;
 	disarmStallWatchdog();
+	// If an auto-continue nudge was used this turn and we still reached a real
+	// result, the recovery worked — log it (greppable alongside the firing line).
+	if (autoContinueCount > 0) {
+		log.info('Subprocess', 'auto-continue recovered turn', { attempts: autoContinueCount }, '✅');
+	}
+	// Turn genuinely ended → clear the per-turn auto-continue state so the next
+	// turn starts clean (also covered by runTurn, but this catches turns that end
+	// without a fresh runTurn, e.g. the last in a drained queue).
+	autoContinueCount = 0;
+	autoContinueEscalated = false;
+	toolInFlight = false;
 	deps.postMessage({ type: 'setProcessing', data: { isProcessing: false } });
 	flushPendingSilentQuery();
 
@@ -1163,9 +1360,6 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 
 		case 'assistant':
 			if (jsonData.message && jsonData.message.content) {
-				if (jsonData.message.model) {
-					deps.postMessage({ type: 'modelResolved', model: jsonData.message.model });
-				}
 				if (jsonData.message.usage) {
 					tokenCounters.addTokens(
 						jsonData.message.usage.input_tokens || 0,
@@ -1203,6 +1397,11 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 							data: content.thinking.trim()
 						});
 					} else if (content.type === 'tool_use') {
+						// A tool is now running; the claude stream legitimately goes quiet
+						// until its tool_result returns. Suppress the 60s auto-continue while
+						// this is true (see armStallWatchdog) — the turn isn't dropped, the
+						// tool is just working.
+						toolInFlight = true;
 						const toolInfo = `🔧 Executing: ${content.name}`;
 						let toolInput = '';
 						let fileContentBefore: string | undefined;
@@ -1276,6 +1475,10 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 			if (jsonData.message && jsonData.message.content) {
 				for (const content of jsonData.message.content) {
 					if (content.type === 'tool_result') {
+						// Tool finished — the stream may now legitimately go quiet while
+						// the model thinks about the result. Clear the in-flight flag so a
+						// genuinely dropped turn after this point can be auto-continued.
+						toolInFlight = false;
 						let resultContent = content.content || 'Tool executed successfully';
 
 						if (typeof resultContent === 'object' && resultContent !== null) {
@@ -1335,6 +1538,11 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 			break;
 
 		case 'result':
+			// Record whether this turn ended on a genuine error so the auto-continue
+			// watchdog won't try to "recover" a known-bad end (which would just loop
+			// the same failure). A non-'success' subtype (e.g. error_during_execution)
+			// or an is_error success both count as error ends.
+			lastResultWasError = jsonData.subtype !== 'success' || !!jsonData.is_error;
 			if (jsonData.subtype === 'success') {
 				if (jsonData.is_error && jsonData.result && (
 					jsonData.result.includes('Invalid API key') ||
@@ -1371,8 +1579,19 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 				}
 
 				tokenCounters.addRequest();
-				if (jsonData.total_cost_usd) {
-					tokenCounters.addTokens(0, 0, jsonData.total_cost_usd);
+				// `total_cost_usd` is CUMULATIVE per warm process, so bill only the
+				// delta since the previous result on this process — adding the raw
+				// cumulative every turn compounds the total quadratically. Reset the
+				// baseline on spawn (see spawnProcess). max(0, …) keeps any duplicate
+				// or out-of-order result from subtracting (fails safe: under, not over).
+				let turnCostDelta = 0;
+				if (typeof jsonData.total_cost_usd === 'number') {
+					const cumulative = jsonData.total_cost_usd;
+					turnCostDelta = Math.max(0, cumulative - lastProcessCumulativeCost);
+					lastProcessCumulativeCost = cumulative;
+					if (turnCostDelta > 0) {
+						tokenCounters.addTokens(0, 0, turnCostDelta);
+					}
 				}
 
 				try {
@@ -1395,7 +1614,7 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 						totalTokensInput: resultTotals.totalTokensInput,
 						totalTokensOutput: resultTotals.totalTokensOutput,
 						requestCount: resultTotals.requestCount,
-						currentCost: jsonData.total_cost_usd,
+						currentCost: turnCostDelta,
 						currentDuration: jsonData.duration_ms,
 						currentTurns: jsonData.num_turns
 					}
@@ -1547,6 +1766,17 @@ export async function stopProcess(): Promise<void> {
 		setTimeout(() => {
 			if (isProcessing && currentClaudeProcess === procAtInterrupt) {
 				log.warn('Subprocess', 'no result after interrupt — forcing turn end', undefined, '⏱️');
+				// Surface the anomaly — the CLI acked the interrupt but never emitted a
+				// `result`, so the turn would otherwise vanish with no feedback. The
+				// session is still warm; the user can just send again.
+				conversation.sendAndSaveMessage({
+					type: 'notice',
+					data: {
+						title: 'Turn ended without a result',
+						content: 'Claude acknowledged the stop but never returned a result, so the turn was force-ended. The session is still active — send again to continue.',
+						variant: 'warning'
+					}
+				});
 				onTurnEnd();
 			}
 		}, 6_000);
@@ -1596,6 +1826,17 @@ export async function sendNow(): Promise<void> {
 		setTimeout(() => {
 			if (isProcessing && currentClaudeProcess === procAtInterrupt) {
 				log.warn('Subprocess', 'no result after sendNow interrupt — forcing turn end', undefined, '⏱️');
+				// Surface the anomaly — interrupt acked but no `result` arrived, so we
+				// force the turn end to drain the queued head. Tell the user why there
+				// was a gap; the queued prompt still runs next.
+				conversation.sendAndSaveMessage({
+					type: 'notice',
+					data: {
+						title: 'Turn ended without a result',
+						content: 'Claude acknowledged the interrupt but never returned a result, so the turn was force-ended. Running your queued prompt now.',
+						variant: 'warning'
+					}
+				});
 				onTurnEnd();
 			}
 		}, 6_000);
@@ -1636,7 +1877,6 @@ export function demoteQueued(id: string): void {
 		data: {
 			message: item.message,
 			planMode: !!item.planMode,
-			thinkingMode: !!item.thinkingMode,
 			images: (item.images || []).map(img =>
 				typeof img === 'string' ? { filePath: img } : { filePath: img.filePath, previewUri: img.previewUri }
 			),

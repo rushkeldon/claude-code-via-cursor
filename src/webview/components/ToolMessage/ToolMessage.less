@@ -6,18 +6,40 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+// Single-line variant: the file path rides inline (right-aligned, start-truncated),
+// so there's no body row and no divider — the whole tool call is one line tall.
+.tool-header--inline {
+  margin-bottom: 0;
+  border-bottom: none;
+
+  .tool-info {
+    flex: 0 0 auto;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+}
+
+// Tool icon: a white glyph over the category gradient. The gradient stops come
+// from the --tool-accent-a/b CSS vars set by `cat-<category>` on the message root
+// (see ChatMessage.less) — the SAME vars the accent border reads, so icon and
+// border always match. One rule covers every category; no per-category classes.
+//
+// Placeholder glyph (white circle), reused until per-category SVGs are dropped in.
+// To customize: swap this data-URI for the real white SVG (fill='%23fff').
+@tool-glyph-placeholder: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='7' fill='%23fff'/%3E%3C/svg%3E";
+
 .tool-icon {
   width: 14px;
   height: 14px;
   border-radius: 3px;
-  background: linear-gradient(135deg, #7c8bed 0%, #5d6fe1 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8px;
-  color: white;
-  font-weight: 600;
   flex-shrink: 0;
+  background:
+    url("@{tool-glyph-placeholder}") center / 12px no-repeat,
+    linear-gradient(
+      135deg,
+      var(--tool-accent-a, #7c8bed) 0%,
+      var(--tool-accent-b, #5d6fe1) 100%
+    );
 }
 
 .tool-info {
@@ -28,27 +50,9 @@
   flex: 1;
 }
 
-.tool-copy-btn {
-  background: transparent;
-  border: none;
-  color: var(--vscode-descriptionForeground);
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    opacity: 1;
-    background-color: var(--vscode-list-hoverBackground);
-  }
-}
-
-.tool-header:hover .tool-copy-btn {
+// Reveal the shared CopyButton when the tool header is hovered (the button's
+// base style + hover live in CopyButton.less).
+.tool-header:hover .copy-button {
   opacity: 0.7;
 }
 
@@ -62,11 +66,30 @@
 }
 
 .tool-file-link {
-  color: var(--vscode-textLink-foreground);
+  // Light cornflower blue — the theme's default link color (teal) clashed with
+  // the scheme and read too close to the Thoughts toggle. Hard-coded so it stays
+  // consistent regardless of VS Code theme.
+  color: #a6c8ff;
   cursor: pointer;
   text-decoration: underline;
 
   &:hover {
-    color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+    color: #c4daff;
   }
+}
+
+// Inline path in the collapsed header: take the remaining width and truncate the
+// START of the string (ellipsis on the left) so the filename stays visible at the
+// right. `direction: rtl` flips the ellipsis + clip to the left edge and anchors
+// the content to the right; the path's own LTR runs keep their order, so it reads
+// like `…/claude-code-via-cursor/package.json`.
+.tool-file-link--inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  font-size: 12px;
+  font-family: var(--vscode-editor-font-family);
 }

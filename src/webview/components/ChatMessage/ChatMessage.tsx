@@ -1,39 +1,39 @@
 import './ChatMessage.less';
 import { ComponentChildren } from 'preact';
+import { CopyButton } from '../CopyButton/CopyButton';
 
 interface ChatMessageProps {
   type: 'user' | 'claude' | 'error' | 'system' | 'tool' | 'tool-result' | 'thinking';
   icon?: string;
   label?: string;
   showHeader?: boolean;
+  // Category accent (tool messages). Applies `cat-<accent>` on the root, which
+  // sets --tool-accent-a/b CSS vars; both the left accent border (::before, same
+  // element) and the descendant .tool-icon read those vars, so they always match.
+  accent?: string;
+  // Raw text the header copy button should put on the clipboard. Pass the original
+  // markdown source (e.g. a Claude response) so copy yields literal `**bold**`,
+  // `# headings`, fenced blocks — not the DOM's flattened textContent. When
+  // omitted, falls back to reading rendered .message-content text.
+  copyText?: string;
   children: ComponentChildren;
 }
 
-function copyMessageContent(el: HTMLElement | null) {
-  if (!el) return;
-  const content = el.querySelector('.message-content');
-  if (content) {
-    navigator.clipboard.writeText(content.textContent || '');
-  }
-}
-
-export function ChatMessage({ type, icon, label, showHeader = true, children }: ChatMessageProps) {
+export function ChatMessage({ type, icon, label, showHeader = true, accent, copyText, children }: ChatMessageProps) {
   let messageRef: HTMLDivElement | null = null;
 
+  // Prefer the raw markdown source (preserves **bold**, headings, code fences).
+  // Fall back to the rendered text when no source was provided.
+  const copyWholeMessage = () =>
+    copyText ?? messageRef?.querySelector('.message-content')?.textContent ?? '';
+
   return (
-    <div class={`message ${type}`} ref={(el) => { messageRef = el; }}>
+    <div class={`message ${type}${accent ? ` cat-${accent}` : ''}`} ref={(el) => { messageRef = el; }}>
       {showHeader && icon && label && (
         <div class="message-header">
           <div class={`message-icon ${type}`}>{icon}</div>
           <div class="message-label">{label}</div>
-          <button
-            class="copy-btn"
-            type="button"
-            title="Copy message"
-            onClick={() => copyMessageContent(messageRef)}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-          </button>
+          <CopyButton text={copyWholeMessage} title="Copy message" class="copy-btn" />
         </div>
       )}
       <div class="message-content">{children}</div>

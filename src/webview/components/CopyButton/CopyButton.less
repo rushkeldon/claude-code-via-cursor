@@ -1,0 +1,27 @@
+// Shared copy button — canonical look (was ToolMessage's tool-copy-btn): a
+// 12px icon-only button, faint until the surrounding row/block is hovered.
+// Containers opt in to the hover reveal with `.copy-button` inside them; see
+// the `:hover .copy-button` rules co-located with each host component.
+.copy-button {
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    opacity: 1;
+    background-color: var(--vscode-list-hoverBackground);
+  }
+
+  svg {
+    display: block;
+  }
+}

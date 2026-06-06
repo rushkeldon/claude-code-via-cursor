@@ -40,62 +40,6 @@
   &-text {
     flex: 1;
   }
-
-  &-model {
-    position: relative;
-    max-width: 140px;
-    opacity: 0.7;
-    font-size: 11px;
-    flex-shrink: 0;
-
-    // Slide the pill in to its resting position on hover. The transform is the
-    // whole effect — no fade. Off-hover it parks off-screen right (clipped by
-    // .app-root's overflow:hidden), so it visibly slides back out on mouse-out.
-    &:hover .session-status-model-tooltip {
-      transform: translate(0, -50%);
-    }
-  }
-
-  &-model-label {
-    display: inline-block;
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    vertical-align: bottom;
-  }
-
-  &-model-tooltip {
-    position: absolute;
-    top: 50%;
-    // -12px cancels .session-status's right padding so the square edge sits
-    // flush against the panel wall when the pill is fully slid in.
-    right: -12px;
-    max-width: 360px;
-    padding: 8px 16px;
-    // square on the right (against the wall), rounded pill cap on the left.
-    // large px clamps to half-height → a true semicircle cap, not an ellipse.
-    border-radius: 999px 0 0 999px;
-    background: #000;
-    color: #fff;
-    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.45);
-    font-size: 11px;
-    line-height: 1.4;
-    white-space: nowrap;
-    z-index: 100;
-    pointer-events: none;
-    // start fully off-screen to the right (own width + a margin), vertically centered
-    transform: translate(calc(100% + 25px), -50%);
-    transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
-
-    &-line {
-      white-space: nowrap;
-    }
-
-    &-label {
-      opacity: 0.6;
-    }
-  }
 }
 
 @keyframes session-status-pulse {

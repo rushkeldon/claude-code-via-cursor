@@ -4,7 +4,7 @@
   border-radius: 4px;
 
   &.user {
-    border: 1px solid rgba(64, 165, 255, 0.2);
+    border: 1px solid rgba(0, 255, 65, 0.25);
     border-radius: 8px;
     color: var(--vscode-editor-foreground);
     font-family: var(--vscode-editor-font-family);
@@ -18,7 +18,7 @@
       top: 0;
       bottom: 0;
       width: 4px;
-      background: linear-gradient(180deg, #40a5ff 0%, #0078d4 100%);
+      background: linear-gradient(180deg, #00ff41 0%, #008f11 100%);
     }
   }
 
@@ -71,6 +71,8 @@
     position: relative;
     overflow: hidden;
 
+    // Accent border reads the same --tool-accent vars as the tool icon (set by
+    // cat-<category> below), so the left border always matches the icon color.
     &::before {
       content: "";
       position: absolute;
@@ -78,7 +80,11 @@
       top: 0;
       bottom: 0;
       width: 4px;
-      background: linear-gradient(180deg, #7c8bed 0%, #5d6fe1 100%);
+      background: linear-gradient(
+        180deg,
+        var(--tool-accent-a, #7c8bed) 0%,
+        var(--tool-accent-b, #5d6fe1) 100%
+      );
     }
 
     // When a result card follows this tool call, pull them together so the
@@ -89,6 +95,22 @@
       margin-bottom: 2px;
     }
   }
+
+  // ── Tool category accents ──────────────────────────────────────────────
+  // SINGLE SOURCE OF TRUTH for tool category color. cat-<category> on the message
+  // root sets --tool-accent-a (light stop) and --tool-accent-b (dark stop); both
+  // the accent border (.tool::before, same element) and the descendant .tool-icon
+  // read these vars, so the left border always matches the icon. Set via TSX:
+  // ToolMessage passes its category as ChatMessage's `accent` prop. Change a color
+  // here and icon + border update together.
+  &.cat-read    { --tool-accent-a: #4a90e2; --tool-accent-b: #2f6fc0; } // blue — innocuous
+  &.cat-mutate  { --tool-accent-a: #f5d020; --tool-accent-b: #e0b000; } // warning yellow — editing is a little dangerous
+  &.cat-search  { --tool-accent-a: #2ec9b0; --tool-accent-b: #1c9d88; } // teal
+  &.cat-execute { --tool-accent-a: #000000; --tool-accent-b: #000000; } // flat black "terminal screen" — both stops equal so no gradient shimmer (green is the user's color)
+  &.cat-web     { --tool-accent-a: #a864c4; --tool-accent-b: #8638a8; } // violet
+  &.cat-agentic { --tool-accent-a: #8a93a6; --tool-accent-b: #5f6b80; } // slate grey
+  &.cat-mcp     { --tool-accent-a: #d45c8a; --tool-accent-b: #b03968; } // rose
+  &.cat-generic { --tool-accent-a: #7c8bed; --tool-accent-b: #5d6fe1; } // neutral purple — fallback
 
   &.tool-result {
     border: 1px solid rgba(28, 192, 140, 0.2);
@@ -131,36 +153,20 @@
     }
   }
 
-  &:hover .copy-btn {
-    opacity: 0.7;
-  }
-
-  &:hover .user-copy-btn {
+  // Reveal the copy buttons (shared CopyButton; base style in CopyButton.less)
+  // when the message is hovered.
+  &:hover .copy-button {
     opacity: 0.7;
   }
 }
 
+// User message's copy button floats top-right over the bubble (the only
+// positioning delta on top of the shared .copy-button base).
 .user-copy-btn {
   position: absolute;
   top: 6px;
   right: 6px;
-  background: transparent;
-  border: none;
-  color: var(--vscode-descriptionForeground);
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 1;
-
-  &:hover {
-    opacity: 1;
-    background-color: var(--vscode-list-hoverBackground);
-  }
 }
 
 .message-header {
@@ -173,24 +179,9 @@
   position: relative;
 }
 
+// Header copy button (Claude/system messages) sits flush right in the flex row.
 .copy-btn {
-  background: transparent;
-  border: none;
-  color: var(--vscode-descriptionForeground);
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
   margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    opacity: 1;
-    background-color: var(--vscode-list-hoverBackground);
-  }
 }
 
 .message-icon {
@@ -207,7 +198,7 @@
   margin-left: 6px;
 
   &.user {
-    background: linear-gradient(135deg, #40a5ff 0%, #0078d4 100%);
+    background: linear-gradient(135deg, #00ff41 0%, #008f11 100%);
   }
 
   &.claude {

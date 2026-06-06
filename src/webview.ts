@@ -157,12 +157,17 @@ export function reinitializeWebview(): void {
 }
 
 export async function loadConversation(filename: string): Promise<void> {
+  // The user is deliberately pausing the current session to switch conversations;
+  // the resulting turn-abort should read as a friendly notice, not a red error.
+  subprocess.markUserPaused("history");
   await subprocess.killProcess();
   await loadConversationHistory(filename);
 }
 
 export async function newSession(): Promise<void> {
   log.info("Webview", "enter newSession", undefined, "➡️");
+  // Deliberate pause via the + button — downgrade the abort error to a notice.
+  subprocess.markUserPaused("new-session");
   await subprocess.killProcess();
 
   conversation.setCurrentSessionId(undefined);
@@ -263,17 +268,6 @@ function initializeWebview(): void {
   // checkFirstRun() is no longer called here — it ran before the webview's
   // message listeners were mounted, so firstRunPrompt was dropped. It's now
   // triggered by the `webviewReady` message the webview posts on mount.
-}
-
-function sendModelFull(): void {
-  const fullModel = settings.getFullModelString();
-  postMessage({
-    type: "modelFull",
-    data: {
-      configured: fullModel.configured,
-      resolvedEnv: fullModel.resolvedEnv,
-    },
-  });
 }
 
 function checkFirstRun(): void {
@@ -393,12 +387,6 @@ function sendReadyMessage(): void {
       : "Ready to chat with Claude Code! Type your message below.",
   });
 
-  postMessage({
-    type: "modelSelected",
-    model: settings.getDisplayModel(),
-  });
-
-  sendModelFull();
   settings.sendModelConfig();
 
   sendPlatformInfo();
@@ -439,7 +427,6 @@ async function handleWebviewMessage(message: any): Promise<void> {
       subprocess.sendMessage(
         message.text,
         message.planMode,
-        message.thinkingMode,
         message.images,
       );
       return;
@@ -484,10 +471,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
       return;
     case "webviewReady":
       // The webview has mounted and its listeners are live — now it's safe to
-      // post messages that have no second source. modelFull is resent here
-      // because its only other emit (sendReadyMessage) can fire pre-mount and
-      // be dropped. firstRunPrompt likewise gated here.
-      sendModelFull();
+      // post messages that have no second source (e.g. firstRunPrompt).
       checkFirstRun();
       // Resync the queued-prompt card after a (re)mount — its only other emit
       // sites are queue mutations, which a fresh webview would have missed.
@@ -590,6 +574,21 @@ async function handleWebviewMessage(message: any): Promise<void> {
       // Replay the dynamic model list captured at the initialize handshake.
       // (Empty until the first spawn completes its handshake.)
       subprocess.postModelList();
+      return;
+    case "getThoughtControlConfig":
+      settings.sendThoughtControlConfig();
+      return;
+    case "setThoughtsDisplay":
+      // Persist the Thoughts visibility pref. The change re-injects via --settings
+      // on the next turn's (re)spawn (subprocess compares the thinking signature) —
+      // i.e. "applies next turn", no idle-process kill.
+      settings.setThoughtsOn(message.on);
+      settings.sendThoughtControlConfig();
+      return;
+    case "setEffort":
+      // Persist the Effort pref; same next-turn re-injection as above.
+      settings.setEffort(message.level);
+      settings.sendThoughtControlConfig();
       return;
     case "openModelTerminal":
       terminalCommands.openModelTerminal(
@@ -747,7 +746,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
       );
       return;
     case "askUserQuestionResponse":
-      permissions.handleAskUserQuestionResponse(message.id, message.answers);
+      permissions.handleAskUserQuestionResponse(message.id, message.answers, message.cancelled);
       return;
     case "showInfoMessage":
       vscode.window.showInformationMessage(message.message);

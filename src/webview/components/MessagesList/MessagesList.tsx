@@ -24,7 +24,7 @@ function renderMessage(msg: ChatMsg & { elapsedLabel?: string }, index: number) 
     case 'error':
       return <ErrorMessage key={index} content={msg.content} />;
     case 'thinking' as any:
-      return <ThinkingPill key={index} content={msg.content} elapsedLabel={msg.elapsedLabel || '?'} />;
+      return <ThinkingPill key={index} content={msg.content} elapsedLabel={msg.elapsedLabel || '?'} noThoughts={msg.noThoughts} />;
     case 'question' as any:
       return msg.questionData ? <InlineQuestionCard key={index} questionData={msg.questionData} /> : null;
     case 'permission' as any:
@@ -40,6 +40,9 @@ function renderMessage(msg: ChatMsg & { elapsedLabel?: string }, index: number) 
         </NoticeCard>
       );
     case 'tool' as any:
+      // AskUserQuestion is shown as its own interactive Q&A card — don't also
+      // render the generic tool card for it (it's redundant noise above the panel).
+      if (msg.toolName === 'AskUserQuestion') return null;
       return <ToolUseMessage key={index} toolName={msg.toolName || 'Tool'} content={msg.content} rawInput={msg.rawInput} />;
     case 'tool-result' as any:
       return <ToolResultMessage key={index} content={msg.content} />;

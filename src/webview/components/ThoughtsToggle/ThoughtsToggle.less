@@ -1,0 +1,22 @@
+.thoughts-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid var(--vscode-widget-border, var(--vscode-input-border, transparent));
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--vscode-foreground);
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+  }
+
+  &.active {
+    color: var(--vscode-textLink-foreground);
+    border-color: var(--vscode-textLink-foreground);
+  }
+}

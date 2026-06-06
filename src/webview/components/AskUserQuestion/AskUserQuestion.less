@@ -1,3 +1,5 @@
+@import (reference) "../../styles/buttons.less";
+
 .ask-user-question {
   margin-bottom: 10px;
   padding: 12px;
@@ -29,6 +31,39 @@
   margin-bottom: 10px;
   font-weight: 600;
   font-size: 13px;
+
+  // Resolved cards: the header is the disclosure toggle.
+  &--toggle {
+    cursor: pointer;
+    user-select: none;
+  }
+}
+
+// When a resolved card is collapsed the body is unmounted, so the header is the
+// only child — drop its bottom margin so there's no dead space below it.
+.ask-user-question.decided:not(:has(.ask-question-content)) .ask-question-header {
+  margin-bottom: 0;
+}
+
+.ask-question-chevron {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  width: 10px;
+  flex-shrink: 0;
+}
+
+// "answered" / "cancelled" badge pushed to the right edge of the header.
+.ask-question-status {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground);
+}
+
+.ask-user-question.cancelled .ask-question-status {
+  color: #e0a04a;
 }
 
 .ask-question-icon {
@@ -127,6 +162,36 @@
 
 .ask-question-buttons {
   margin-top: 10px;
+  display: flex;
+  gap: 6px;
+  // Cancel pinned left, Submit pushed to the right edge.
+  justify-content: space-between;
+}
+
+// Submit + Cancel pull the shared .action-button() mixin so the Q&A buttons read
+// as one family with the prompt-pane Send/Stop buttons (same font/size/metrics).
+.ask-question-submit,
+.ask-question-cancel {
+  .action-button();
+}
+
+.ask-question-submit {
+  // User-green (Matrix green) gradient with dark text for legibility — matches
+  // the QUEUED badge precedent.
+  background: linear-gradient(180deg, #00ff41 0%, #008f11 100%);
+  color: #001b00;
+
+  &:hover { filter: brightness(1.08); }
+}
+
+.ask-question-cancel {
+  // Light gray (NOT white, NOT red) — a neutral "decline to answer" that's
+  // deliberately distinct from the red Stop button so the two aren't confused.
+  background: #d4d4d4;
+  color: #1a1a1a;
+  border: 1px solid var(--vscode-input-border, rgba(255, 255, 255, 0.15));
+
+  &:hover { filter: brightness(0.95); }
 }
 
 .ask-question-decision {

@@ -14,12 +14,23 @@ interface SettingsDeps {
 
 let deps: SettingsDeps | undefined;
 let selectedModel = 'default';
+// Thinking controls, extension-owned (injected at spawn via --settings; never
+// written to the dev's settings.local.json). workspaceState is the live value;
+// package.json config is the seed/default and only applies until the user sets one.
+let effort: string | undefined;   // undefined = inherit the model's default effort
+let thoughtsOn = true;            // true = display 'summarized', false = 'omitted'
 
 export function init(d: SettingsDeps): void {
 	log.info('Settings', 'init', { hasPostMessage: !!d.postMessage }, '🔧');
 	deps = d;
 	selectedModel = d.workspaceState.get('claude.selectedModel', 'default');
-	log.debug('Settings', 'loaded selectedModel from workspace state', { selectedModel }, '📥');
+	const cfg = vscode.workspace.getConfiguration('claudeCodeChat');
+	const wsThoughts = d.workspaceState.get<boolean | undefined>('claude.thoughtsOn', undefined);
+	thoughtsOn = typeof wsThoughts === 'boolean' ? wsThoughts : cfg.get<boolean>('thinking.show', true);
+	const wsEffort = d.workspaceState.get<string | undefined>('claude.effort', undefined);
+	const cfgEffort = (cfg.get<string>('thinking.effort', '') || '').trim();
+	effort = (typeof wsEffort === 'string' && wsEffort) ? wsEffort : (cfgEffort || undefined);
+	log.debug('Settings', 'loaded thinking prefs', { selectedModel, effort, thoughtsOn }, '📥');
 }
 
 export function getSelectedModel(): string {
@@ -36,18 +47,73 @@ export function recordSelectedModel(model: string): void {
 	log.debug('Settings', 'recordSelectedModel', { model }, '📝');
 }
 
-const MODEL_TIER_MAP: Record<string, string> = {
-	'default': 'opus',
-	'opus': 'opus',
-	'sonnet': 'sonnet',
-	'haiku': 'haiku',
-};
+// ── Thinking controls (Effort depth + Thoughts visibility) ─────────────────
+// Extension-owned prefs injected at spawn via --settings. Never written to the
+// dev's settings.local.json (build-to-contract: we set the advertised keys; the
+// provider honors them where it can — e.g. first-party / Opus 4.6).
 
-export function getDisplayModel(): string {
-	if (MODEL_TIER_MAP[selectedModel]) {
-		return MODEL_TIER_MAP[selectedModel]!;
+export function getEffort(): string | undefined {
+	return effort;
+}
+
+// level: one of the selected model's supportedEffortLevels, or undefined/'' to
+// clear (inherit the model's default). Stored in workspaceState (the live value).
+export function setEffort(level: string | undefined): void {
+	effort = level && level.trim() ? level : undefined;
+	deps?.workspaceState.update('claude.effort', effort);
+	log.debug('Settings', 'setEffort', { effort }, '📝');
+}
+
+export function getThoughtsOn(): boolean {
+	return thoughtsOn;
+}
+
+export function setThoughtsOn(on: boolean): void {
+	thoughtsOn = !!on;
+	deps?.workspaceState.update('claude.thoughtsOn', thoughtsOn);
+	log.debug('Settings', 'setThoughtsOn', { thoughtsOn }, '📝');
+}
+
+// Build the `--settings` JSON injected at spawn for the selected model's thinking
+// prefs, gated on the model's advertised capability flags (gate #2). Returns
+// undefined when there's nothing to set. We set the advertised keys per the
+// contract; the provider honors them where it can (first-party / Opus 4.6) and
+// silently ignores them where it can't (e.g. Bedrock-4.8) — not our concern.
+//
+// Note: alias/legacy catalog entries ('default', 'haiku', opus-4-1) carry NONE of
+// the flags, and the catalog may not be loaded on the very first spawn — in both
+// cases we inject nothing (consistent with the UI hiding the controls). A user
+// picks a concrete model to steer thoughts/effort.
+export function buildThinkingSettingsArg(models: any[] | undefined, modelValue: string): string | undefined {
+	const entry = Array.isArray(models) ? models.find(m => m?.value === modelValue) : undefined;
+	const s: Record<string, unknown> = {};
+	if (entry?.supportsAdaptiveThinking) {
+		s.thinkingDisplay = thoughtsOn ? 'summarized' : 'omitted';
+		s.showThinkingSummaries = thoughtsOn;
 	}
-	return selectedModel;
+	if (entry?.supportsEffort && effort) {
+		s.effort = effort;
+	}
+	if (Object.keys(s).length === 0) { return undefined; }
+	return JSON.stringify(s);
+}
+
+// Signature of the user's thinking prefs (model-INDEPENDENT — model switches
+// happen in-band via set_model and must not force a respawn). When this changes,
+// the next turn respawns to re-inject --settings (the warm process can't pick up
+// new --settings in-band).
+export function getThinkingSig(): string {
+	return `${effort ?? ''}|${thoughtsOn}`;
+}
+
+// Push the current thinking-control state to the webview (the pickers reflect it;
+// capability flags are derived webview-side from the modelList catalog).
+export function sendThoughtControlConfig(): void {
+	deps?.postMessage({
+		type: 'thoughtControlConfig',
+		data: { thoughtsOn, effort },
+	});
+	log.debug('Settings', 'sent thoughtControlConfig', { thoughtsOn, effort }, '📤');
 }
 
 // Path to the project-level CLI settings the extension manages: <workspace>/.claude/settings.local.json.
@@ -120,6 +186,9 @@ export function sendModelConfig(): void {
 		},
 	});
 	log.debug('Settings', 'sent modelConfig', { local, globalDefault: global.configured }, '📤');
+	// Piggyback the thinking-control state so the Effort/Thoughts pickers populate
+	// on the same request the webview already makes for model config.
+	sendThoughtControlConfig();
 }
 
 // Reads ~/.claude/settings.json for the full provider-qualified model string.
@@ -145,7 +214,6 @@ export function sendCurrentSettings(): void {
 	log.debug('Settings', 'enter sendCurrentSettings', undefined, '➡️');
 	const config = vscode.workspace.getConfiguration('claudeCodeChat');
 	const settings = {
-		'thinking.intensity': config.get<string>('thinking.intensity', 'think'),
 		'wsl.enabled': config.get<boolean>('wsl.enabled', false),
 		'wsl.distro': config.get<string>('wsl.distro', 'Ubuntu'),
 		'wsl.nodePath': config.get<string>('wsl.nodePath', ''),
@@ -212,24 +280,12 @@ export async function setSelectedModel(model: string, tierModels?: { sonnet: str
 		deps?.workspaceState.update('claude.selectedModel', model);
 		await removeModelEnvVars();
 		sendCurrentSettings();
-		deps?.postMessage({ type: 'modelSwitched', model: model });
 		vscode.window.showInformationMessage(`Model switched to: ${model.charAt(0).toUpperCase() + model.slice(1)}`);
 	} else {
 		log.debug('Settings', 'custom model selected, setting env vars', { model, tierModels }, '🔀');
 		selectedModel = model;
 		deps?.workspaceState.update('claude.selectedModel', model);
 		await setModelEnvVars(model, tierModels);
-
-		deps?.postMessage({
-			type: 'modelSwitching',
-			model: model
-		});
-
-		deps?.postMessage({
-			type: 'modelSwitched',
-			model: model
-		});
-
 		vscode.window.showInformationMessage(`Model switched to: ${model}`);
 	}
 	log.debug('Settings', 'exit setSelectedModel', { selectedModel }, '⬅️');

@@ -12,6 +12,11 @@ export interface QuestionData {
   }>;
   status: 'answered' | 'expired' | 'cancelled';
   answers?: Record<string, string>;
+  // Raw input state captured at submit/cancel time, keyed by question index, so
+  // the resolved (collapsed) card can re-render the exact controls the user left:
+  // which options were checked, and any text they typed. Preserved on cancel too.
+  selections?: Record<number, string[]>;
+  freeTexts?: Record<number, string>;
 }
 
 export interface PermissionData {
@@ -29,6 +34,10 @@ export interface ChatMsg {
   content: string;
   images?: Array<{ filePath: string; previewUri: string }>;
   elapsedLabel?: string;
+  // For 'thinking' pills: a thinking block occurred but returned no thought text
+  // (Thoughts On, provider didn't honor display — e.g. Bedrock-4.8). Renders a
+  // timer-only pill with an honest note instead of an expandable thought.
+  noThoughts?: boolean;
   timestamp?: number;
   questionData?: QuestionData;
   permissionData?: PermissionData;

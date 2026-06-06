@@ -33,6 +33,25 @@
     font-size: 12px;
   }
 
+  // Timer-only pill (a thinking block occurred but returned no thought text).
+  &--empty {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.08));
+    color: var(--vscode-descriptionForeground);
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+
+  &-note {
+    opacity: 0.75;
+    font-style: italic;
+  }
+
   &-content {
     margin-top: 6px;
     padding: 10px 12px;
