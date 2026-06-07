@@ -60,3 +60,8 @@ claude-code-chat/
 
 # Doc work that shouldn't ship
 doc/logs/
+
+# Disney Dev MCP debug logs and metadata
+.disney_dev_mcp/
+# ChromaDB vector storage
+.chroma/

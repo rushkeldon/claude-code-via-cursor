@@ -46,6 +46,14 @@ export function ToolUseMessage({
   const filePath = rawInput?.file_path;
   const hasClickablePath = filePath && isAbsolutePath(filePath);
 
+  // The "Agent" tool spawns a subagent. Relabel it "Sub agent" (its real role)
+  // and surface its `description` inline so the card isn't an empty "Agent" box.
+  const isAgent = toolName === "Agent";
+  const displayName = isAgent ? "Sub agent" : toolName;
+  const agentDescription = isAgent
+    ? (rawInput?.description as string | undefined)
+    : undefined;
+
   // For an absolute file path, put a clickable cursor:// link on the clipboard
   // instead of the bare path. Other copies (Bash command, content) stay plain.
   const clipboardValue = hasClickablePath ? toCursorLink(filePath) : copyText;
@@ -54,6 +62,10 @@ export function ToolUseMessage({
   // inline in the header, right-aligned and start-truncated so the filename stays
   // visible. Other tools (Bash, etc.) keep their multi-line body below the header.
   const inlinePath = hasClickablePath;
+
+  // Single-line header: file-path tools (inline path) AND the subagent card (name +
+  // description on one line). The --inline class drops the body divider/margin.
+  const inlineHeader = inlinePath || isAgent;
 
   // Category drives the shared --tool-accent CSS vars (set by cat-<category> on
   // the message root), which color BOTH the icon gradient and the accent border.
@@ -64,13 +76,13 @@ export function ToolUseMessage({
   // one-liner and have no body to fold. So we only show the chevron when there's
   // a body. Opt ChatMessage out of its own header-collapse (collapsible={false})
   // since the tool-header owns the toggle here.
-  const hasBody = !!content && !inlinePath;
+  const hasBody = !!content && !inlineHeader;
   const { displayed, toggle, chevron } = useCollapsible(true);
 
   return (
     <ChatMessage type="tool" showHeader={false} accent={category} collapsible={false}>
       <div
-        class={`tool-header${inlinePath ? " tool-header--inline" : ""}${hasBody ? " tool-header--toggle" : ""}`}
+        class={`tool-header${inlineHeader ? " tool-header--inline" : ""}${hasBody ? " tool-header--toggle" : ""}`}
         onClick={hasBody ? toggle : undefined}
         role={hasBody ? "button" : undefined}
         title={hasBody ? (displayed ? "Collapse" : "Expand") : undefined}
@@ -80,7 +92,12 @@ export function ToolUseMessage({
             the tool name are enough; the icon read as clutter. Kept (commented)
             for a one-line revert. */}
         {/* <div class="tool-icon" /> */}
-        <div class="tool-info">{toolName}</div>
+        <div class="tool-info">{displayName}</div>
+        {agentDescription && (
+          <span class="tool-agent-desc" title={agentDescription}>
+            {agentDescription}
+          </span>
+        )}
         {inlinePath && (
           // The rtl truncation in CSS clips the START of the path (ellipsis on the
           // left) so the filename stays visible; the path's LTR runs keep order.

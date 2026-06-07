@@ -52,6 +52,19 @@
   flex: 1;
 }
 
+// Subagent description riding inline in the header next to "Sub agent". Takes the
+// remaining width and end-truncates with an ellipsis so the card stays exactly one
+// line tall — no taller than the bare "Agent" box it replaces. Muted vs. the name.
+.tool-agent-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
 // Reveal the shared CopyButton when the tool header is hovered (the button's
 // base style + hover live in CopyButton.less).
 .tool-header:hover .copy-button {

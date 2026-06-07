@@ -311,8 +311,8 @@ function checkFirstRun(): void {
 }
 
 // Probes the OS for installed terminal emulators. Returned names must match the
-// substrings getTerminalLaunchCommand() keys on, so detection and launching stay
-// in sync. Never throws — a failed probe just means "not found".
+// substrings getTerminalType() keys on, so detection and launching stay in sync.
+// Never throws — a failed probe just means "not found".
 function detectTerminals(): void {
   const platform = process.platform;
   const found: string[] = [];
@@ -1144,6 +1144,332 @@ function fetchCommandList(): void {
   postMessage({ type: "commandList", data: [] });
 }
 
+// ---------------------------------------------------------------------------
+// Terminal launching
+//
+// Everything below dispatches through ONE switch keyed on the terminal type
+// (openTerminal). Each case is deliberately SELF-SUFFICIENT — it does its own
+// cwd handling, its own escaping, and its own spawn. Duplication across cases is
+// intentional: each terminal is its own escaping minefield, and we want to tweak
+// one without endangering the other eight. The three entry points below keep
+// their distinct gating, assemble an options object, and hand off to the switch.
+// ---------------------------------------------------------------------------
+
+type TerminalType =
+  | "integrated"
+  | "terminal"
+  | "iterm"
+  | "kitty"
+  | "ghostty"
+  | "alacritty"
+  | "warp"
+  | "hyper"
+  | "wezterm"
+  | "rio";
+
+type TerminalLaunchOpts = {
+  mode: "fork" | "cold";
+  cwd?: string;
+  sessionId?: string; // fork only
+  command?: string; // optional slash command for fork (already normalized with leading /)
+  model?: string;
+  yolo: boolean;
+  name: string;
+};
+
+// Resolve which terminal we're launching from existing config. useIntegrated wins;
+// otherwise normalize the externalApp string into the enum (Terminal.app is the
+// default external target when nothing more specific matches).
+function getTerminalType(): TerminalType {
+  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  if (config.get<boolean>("terminal.useIntegrated", true)) return "integrated";
+  const app = (config.get<string>("terminal.externalApp", "") || "").toLowerCase();
+  if (app.includes("iterm")) return "iterm";
+  if (app.includes("ghostty")) return "ghostty";
+  if (app.includes("kitty")) return "kitty";
+  if (app.includes("alacritty")) return "alacritty";
+  if (app.includes("warp")) return "warp";
+  if (app.includes("hyper")) return "hyper";
+  if (app.includes("wezterm")) return "wezterm";
+  if (app.includes("rio")) return "rio";
+  return "terminal"; // Terminal.app / default external
+}
+
+// The `claude …` command string for the external (real-terminal) cases. External
+// terminals run `claude` off PATH (the integrated case threads WSL / custom
+// executable through buildClaudeTerminalOptions instead). This assembles only the
+// flag list — the dangerous part (escaping + spawn) stays per-case below.
+function buildExternalClaudeCommand(opts: TerminalLaunchOpts): string {
+  const parts = ["claude"];
+  if (opts.yolo) parts.push("--dangerously-skip-permissions");
+  if (opts.sessionId) {
+    parts.push("--resume", opts.sessionId, "--fork-session");
+    if (opts.model) parts.push("--model", opts.model);
+  }
+  // Only append the positional prompt when there actually is one. An empty
+  // breakout must launch a plain interactive session — passing an empty "" makes
+  // the CLI treat it as a one-shot print prompt and exit immediately.
+  if (opts.command) parts.push(`"${opts.command}"`);
+  return parts.join(" ");
+}
+
+// Build the integrated-terminal arg list (shellArgs handed to claude directly).
+function buildIntegratedArgs(opts: TerminalLaunchOpts): string[] {
+  const args: string[] = [];
+  if (opts.command) args.push(opts.command);
+  if (opts.sessionId) {
+    args.push("--resume", opts.sessionId, "--fork-session");
+    if (opts.model) args.push("--model", opts.model);
+  }
+  if (opts.yolo) args.push("--dangerously-skip-permissions");
+  return args;
+}
+
+// Integrated VS Code terminal. cold = plain shell at cwd; fork = claude launched
+// as the terminal's shell via buildClaudeTerminalOptions (VS Code spawns it, so
+// there's no profile-sourcing race to gate on).
+function openIntegratedTerminal(opts: TerminalLaunchOpts): void {
+  if (opts.mode === "cold") {
+    const terminal = vscode.window.createTerminal({
+      name: opts.name || "Terminal",
+      location: { viewColumn: vscode.ViewColumn.One },
+      cwd: opts.cwd,
+    });
+    terminal.show();
+    return;
+  }
+  const terminal = vscode.window.createTerminal({
+    name: opts.name || "Claude fork",
+    location: { viewColumn: vscode.ViewColumn.One },
+    ...terminalCommands.buildClaudeTerminalOptions(buildIntegratedArgs(opts)),
+  });
+  terminal.show();
+}
+
+// The single dispatch point. Once we know we want a terminal (and whether it's a
+// fork or a cold cd), branch on the terminal type — each case fully self-sufficient.
+function openTerminal(opts: TerminalLaunchOpts): void {
+  const type = getTerminalType();
+  log.debug("Webview", "openTerminal", { type, mode: opts.mode }, "➡️");
+
+  // A custom launch template is a user override of all per-app logic — honor it
+  // before the switch so we don't regress that feature. Cold uses a login shell;
+  // fork uses the assembled claude command.
+  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const customTemplate = config.get<string>("terminal.customTemplate", "");
+  if (type !== "integrated" && customTemplate) {
+    const cmd =
+      opts.mode === "cold" ? "exec $SHELL -il" : buildExternalClaudeCommand(opts);
+    const launchCmd = customTemplate.replace(/\{\{command\}\}/g, cmd);
+    runExternalLaunch(launchCmd);
+    return;
+  }
+
+  switch (type) {
+    case "integrated":
+      openIntegratedTerminal(opts);
+      return;
+
+    case "terminal":
+      openTerminalApp(opts);
+      return;
+
+    case "iterm":
+      openITerm(opts);
+      return;
+
+    case "kitty":
+    case "ghostty":
+    case "alacritty":
+    case "warp":
+    case "hyper":
+    case "wezterm":
+    case "rio": {
+      // Not yet supported — tell the user in-chat, then fall back to the
+      // integrated terminal so the button always does something useful.
+      const app = config.get<string>("terminal.externalApp", "") || type;
+      postMessage({
+        type: "notice",
+        data: {
+          title: "Terminal not supported yet",
+          content: `'${app}' isn't supported yet — opening the integrated terminal instead.`,
+          variant: "warning",
+        },
+      });
+      openIntegratedTerminal(opts);
+      return;
+    }
+  }
+}
+
+// Terminal.app — self-contained. Spawns osascript with an ARGV array (no
+// surrounding shell): the command rides in as argv and is read via `on run argv`
+// / `item 1 of argv`, so it never threads through the /bin/sh → osascript -e
+// → AppleScript quoting layers. The busy-wait on `newTab` gates typing until the
+// new tab's login shell has finished sourcing the profile and gone idle — the fix
+// for the race where a command written too early gets echoed but never runs.
+//
+// Single-window fix: when Terminal isn't already running, the act of scripting it
+// makes Terminal auto-open its OWN default window, and then our target-less
+// `do script ""` opens a SECOND window — the long-standing "two stacked windows"
+// bug. We can't reliably tell our window from the launch window by properties
+// (both look identical), and `id of window 1` is NOT our window (do script returns
+// a *tab*, and the new window isn't guaranteed to be window 1). The robust
+// discriminator is whether Terminal was running BEFORE we touched it: only then is
+// there nothing to dispose. When it wasn't running, the windows present right
+// before our `do script` (`preIds`) are the stray launch window(s) — close them
+// with `saving no` (plain `close` is blocked by the "process is running?" prompt).
+// When it WAS running, `preIds` are the user's windows — leave them all. Verified:
+// cold → 1 window, warm → +1 with the user's windows preserved, command runs.
+function openTerminalApp(opts: TerminalLaunchOpts): void {
+  // No single quotes anywhere — single-quoting the cwd breaks Terminal.app's
+  // `do script` (the long-standing "fork ran but landed at ~" bug). Backslash-
+  // escape the path for bash instead; `do script` passes backslashes through fine.
+  const bashEscapedCwd = opts.cwd
+    ? opts.cwd.replace(/(["\s'\\$`&;|*?(){}<>!])/g, "\\$1")
+    : "";
+  const cdPart = bashEscapedCwd ? `cd ${bashEscapedCwd}` : "";
+  // cold = just the cd (Terminal.app's shell is already interactive+login and
+  // STAYS at a prompt; adding `exec $SHELL` would spawn a nested shell that
+  // Terminal re-inits back to ~, silently undoing the cd). fork = cd && claude.
+  const termCommand = opts.mode === "cold" ? "" : buildExternalClaudeCommand(opts);
+  const fullCmd =
+    cdPart && termCommand
+      ? `${cdPart} && ${termCommand}`
+      : cdPart || termCommand;
+
+  const lines = [
+    "on run argv",
+    "  set theCmd to item 1 of argv",
+    // Capture running state BEFORE the launch guard — this is the discriminator
+    // for whether any windows we see next are strays (ours to close) or the user's.
+    '  set wasRunning to (application "Terminal" is running)',
+    "  if not wasRunning then",
+    '    launch application "Terminal"',
+    '    repeat until application "Terminal" is running',
+    "      delay 0.1",
+    "    end repeat",
+    "    delay 0.3",
+    "  end if",
+    '  tell application "Terminal"',
+    // Windows present before OUR window — only strays when Terminal was cold.
+    "    set preIds to id of every window",
+    '    set newTab to do script ""',
+    "    delay 0.1",
+    "    repeat while busy of newTab",
+    "      delay 0.05",
+    "    end repeat",
+    // Dispose of the auto-opened launch window(s) only on a cold start. `saving no`
+    // is required (a running shell otherwise triggers a close-confirmation prompt);
+    // the try/end try swallows the already-gone case, and the settle delay lets the
+    // async close land before we run the command / activate.
+    "    if not wasRunning then",
+    "      repeat with wid in preIds",
+    "        try",
+    "          close (every window whose id is (wid as integer)) saving no",
+    "        end try",
+    "      end repeat",
+    "      delay 0.2",
+    "    end if",
+    '    if theCmd is not "" then do script theCmd in newTab',
+    "    activate",
+    "  end tell",
+    "end run",
+  ];
+  const argv: string[] = [];
+  for (const line of lines) argv.push("-e", line);
+  argv.push(fullCmd);
+
+  spawnOsascript(argv);
+}
+
+// iTerm2 — self-contained. iTerm's `do script` is not subject to Terminal.app's
+// single-quote bug, so the cwd can stay single-quoted here. We open a normal
+// default-profile login shell (which stays open) and TYPE the command in with
+// `write text`, waiting on `is at shell prompt` so the text isn't written before
+// the shell finishes sourcing. Bounded wait (~6s) in case shell integration isn't
+// installed. Launch-if-not-running guard handles a cold iTerm.
+function openITerm(opts: TerminalLaunchOpts): void {
+  const quotedCwd = opts.cwd ? `'${opts.cwd.replace(/'/g, `'\\''`)}'` : "";
+  const cdPart = quotedCwd ? `cd ${quotedCwd}` : "";
+  const termCommand = opts.mode === "cold" ? "" : buildExternalClaudeCommand(opts);
+  const posixWithCd =
+    cdPart && termCommand
+      ? `${cdPart} && ${termCommand}`
+      : cdPart || termCommand;
+  // Escape for the AppleScript double-quoted string literal.
+  const writeText = posixWithCd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+  const lines = [
+    'if application "iTerm" is not running then',
+    '  launch application "iTerm"',
+    '  repeat until application "iTerm" is running',
+    "    delay 0.1",
+    "  end repeat",
+    "  delay 0.5",
+    "end if",
+    'tell application "iTerm"',
+    "  activate",
+    "  set newWin to (create window with default profile)",
+    "  tell current session of newWin",
+    "    set tries to 0",
+    "    repeat until (is at shell prompt) or (tries > 60)",
+    "      delay 0.1",
+    "      set tries to tries + 1",
+    "    end repeat",
+    `    write text "${writeText}"`,
+    "  end tell",
+    "end tell",
+  ];
+  const argv: string[] = [];
+  for (const line of lines) argv.push("-e", line);
+
+  spawnOsascript(argv);
+}
+
+// Spawn osascript directly with an argv array — no surrounding shell, so none of
+// the per-line escaping the old `osascript -e '…'` form needed.
+function spawnOsascript(argv: string[]): void {
+  log.debug("Webview", "spawnOsascript", { argv }, "🚀");
+  const child = cp.spawn("osascript", argv);
+  child.on("error", (error) => {
+    log.error("Webview", "osascript launch failed", { error: error.message }, "💥");
+    postMessage({
+      type: "notice",
+      data: {
+        title: "Terminal launch failed",
+        content: `Couldn't launch the terminal: ${error.message}`,
+        variant: "error",
+      },
+    });
+  });
+}
+
+// Run a fully-formed external launch command through a shell (used only by the
+// customTemplate override path).
+function runExternalLaunch(launchCmd: string): void {
+  if (!launchCmd) return;
+  log.debug("Webview", "external launchCmd", { launchCmd }, "🚀");
+  cp.exec(launchCmd, (error) => {
+    if (error) {
+      log.error(
+        "Webview",
+        "external terminal launch failed",
+        { error: error.message, launchCmd },
+        "💥",
+      );
+      postMessage({
+        type: "notice",
+        data: {
+          title: "Terminal launch failed",
+          content: `Failed to launch external terminal: ${error.message}`,
+          variant: "error",
+        },
+      });
+    }
+  });
+}
+
 // Fork an explicit session id into a new terminal session (the History "Fork"
 // affordance for a session locked by another window). Uses --fork-session so the
 // original transcript is untouched and the fork gets a brand-new id this window
@@ -1155,21 +1481,18 @@ function forkSessionToTerminal(sessionId: string | undefined): void {
     return;
   }
   const config = vscode.workspace.getConfiguration("claudeCodeChat");
-  const yoloMode = config.get<boolean>("permissions.yoloMode", false);
-  const yoloFlag = yoloMode ? "--dangerously-skip-permissions" : "";
-  const forkModel = settings.getLocalModel() || settings.getFullModelString().configured;
+  const yolo = config.get<boolean>("permissions.yoloMode", false);
+  const model = settings.getLocalModel() || settings.getFullModelString().configured;
 
-  const args = ["--resume", sessionId, "--fork-session"];
-  if (forkModel) args.push("--model", forkModel);
-  if (yoloFlag) args.push(yoloFlag);
-
-  const terminal = vscode.window.createTerminal({
-    name: `Claude fork`,
-    location: { viewColumn: vscode.ViewColumn.One },
-    ...terminalCommands.buildClaudeTerminalOptions(args),
+  openTerminal({
+    mode: "fork",
+    cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    sessionId,
+    model,
+    yolo,
+    name: "Claude fork",
   });
-  terminal.show();
-  log.info("Webview", "forked session to terminal", { sessionId, forkModel }, "🍴");
+  log.info("Webview", "forked session to terminal", { sessionId, model }, "🍴");
 }
 
 // Breakout to a real terminal. Typed slash commands no longer route here —
@@ -1204,149 +1527,39 @@ async function launchSlashCommand(
       : `/${command}`
     : "";
   const config = vscode.workspace.getConfiguration("claudeCodeChat");
-  const useIntegrated = config.get<boolean>("terminal.useIntegrated", true);
 
   // Carry the extension's current YOLO mode into the breakaway terminal session
   // so the forked session picks up the same permission posture as the in-process
   // subprocess (which adds the same flag in subprocess.ts when yoloMode is set).
-  const yoloMode = config.get<boolean>("permissions.yoloMode", false);
-  const yoloFlag = yoloMode ? "--dangerously-skip-permissions" : "";
+  const yolo = config.get<boolean>("permissions.yoloMode", false);
 
   // --model parity: launch the forked terminal on the same model the extension
-  // is using, so the forked world matches. settings.local.json / global default
-  // already steer a plain `claude`, but pass it explicitly for the fork.
-  const forkModel = settings.getLocalModel() || settings.getFullModelString().configured;
+  // is using, so the forked world matches.
+  const model = settings.getLocalModel() || settings.getFullModelString().configured;
 
-  if (useIntegrated) {
-    const args: string[] = [];
-    if (fullCommand) args.push(fullCommand);
-    if (sessionId) {
-      args.push("--resume", sessionId, "--fork-session");
-      if (forkModel) args.push("--model", forkModel);
-    }
-    if (yoloFlag) args.push(yoloFlag);
-    const terminal = vscode.window.createTerminal({
-      name: `Claude fork ${fullCommand}`.trim(),
-      location: { viewColumn: vscode.ViewColumn.One },
-      ...terminalCommands.buildClaudeTerminalOptions(args),
-    });
-    terminal.show();
-  } else {
-    const externalApp = config.get<string>("terminal.externalApp", "");
-    const customTemplate = config.get<string>("terminal.customTemplate", "");
-    const workspaceCwd =
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const yoloArg = yoloFlag ? ` ${yoloFlag}` : "";
-    // Only append the positional prompt when there actually is one. An empty
-    // breakout (the "open in external terminal" button) must launch a plain
-    // interactive session — passing an empty "" makes the CLI treat it as a
-    // one-shot print prompt and exit immediately instead of starting a session.
-    const forkArg = sessionId ? ` --resume ${sessionId} --fork-session` : "";
-    const modelArg = sessionId && forkModel ? ` --model ${forkModel}` : "";
-    const promptArg = fullCommand ? ` "${fullCommand}"` : "";
-    const claudeCmd = `claude${yoloArg}${forkArg}${modelArg}${promptArg}`;
-
-    let launchCmd = "";
-    if (customTemplate) {
-      launchCmd = customTemplate.replace(/\{\{command\}\}/g, claudeCmd);
-    } else if (externalApp) {
-      launchCmd = getTerminalLaunchCommand(externalApp, claudeCmd, workspaceCwd);
-    } else {
-      const forkArgs = sessionId
-        ? [fullCommand, "--resume", sessionId, "--fork-session", ...(forkModel ? ["--model", forkModel] : [])]
-        : [fullCommand];
-      const terminal = vscode.window.createTerminal({
-        name: `Claude fork ${fullCommand}`.trim(),
-        location: { viewColumn: vscode.ViewColumn.One },
-        ...terminalCommands.buildClaudeTerminalOptions(forkArgs),
-      });
-      terminal.show();
-      return;
-    }
-
-    if (launchCmd) {
-      log.debug("Webview", "external launchCmd", { launchCmd }, "🚀");
-      cp.exec(launchCmd, (error) => {
-        if (error) {
-          log.error(
-            "Webview",
-            "external terminal launch failed",
-            { error: error.message, launchCmd },
-            "💥",
-          );
-          vscode.window.showErrorMessage(
-            `Failed to launch external terminal: ${error.message}`,
-          );
-        }
-      });
-    }
-  }
+  openTerminal({
+    mode: "fork",
+    cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    sessionId: sessionId || undefined,
+    command: fullCommand || undefined,
+    model,
+    yolo,
+    name: `Claude fork ${fullCommand}`.trim(),
+  });
 }
 
 // Open a plain "cold" terminal at the workspace root — no claude, no fork, no
 // command. Just a shell in the right directory for ad-hoc work (e.g. running
-// `ca` to re-authenticate). Honors the same integrated-vs-external setting as
-// the breakout, and the same focus/activate handling.
+// `ca` to re-authenticate). Honors the same terminal-type dispatch as the breakout.
 function launchColdTerminal(): void {
   log.debug("Webview", "launchColdTerminal", undefined, "➡️");
   const config = vscode.workspace.getConfiguration("claudeCodeChat");
-  const useIntegrated = config.get<boolean>("terminal.useIntegrated", true);
-  const workspaceCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
-  if (useIntegrated) {
-    // Integrated terminal: VS Code's createTerminal already opens at the
-    // workspace cwd and reveals/focuses the panel on show().
-    const terminal = vscode.window.createTerminal({
-      name: "Terminal",
-      location: { viewColumn: vscode.ViewColumn.One },
-      cwd: workspaceCwd,
-    });
-    terminal.show();
-    return;
-  }
-
-  // External terminal: launch the user's login shell at the workspace dir. We
-  // reuse getTerminalLaunchCommand with the shell itself as the "command" so the
-  // per-app cd + activate (focus) handling all applies.
-  const externalApp = config.get<string>("terminal.externalApp", "");
-  const customTemplate = config.get<string>("terminal.customTemplate", "");
-  // `exec $SHELL -il` drops the user into an INTERACTIVE login shell; the cd is
-  // prepended by getTerminalLaunchCommand via the cwd arg. The `-i` is
-  // load-bearing for the `bash -c` terminals (kitty/Ghostty) — without it a bare
-  // login shell may not stay interactive. (AppleScript `do script` runs in a real
-  // tty so it'd persist regardless, but one form keeps both paths consistent.)
-  const shellCmd = "exec $SHELL -il";
-
-  let launchCmd = "";
-  if (customTemplate) {
-    launchCmd = customTemplate.replace(/\{\{command\}\}/g, shellCmd);
-  } else if (externalApp) {
-    launchCmd = getTerminalLaunchCommand(externalApp, shellCmd, workspaceCwd);
-  } else {
-    // No external app configured — fall back to an integrated terminal so the
-    // button always does something useful.
-    const terminal = vscode.window.createTerminal({
-      name: "Terminal",
-      location: { viewColumn: vscode.ViewColumn.One },
-      cwd: workspaceCwd,
-    });
-    terminal.show();
-    return;
-  }
-
-  log.debug("Webview", "cold terminal launchCmd", { launchCmd }, "🚀");
-  cp.exec(launchCmd, (error) => {
-    if (error) {
-      log.error(
-        "Webview",
-        "cold terminal launch failed",
-        { error: error.message, launchCmd },
-        "💥",
-      );
-      vscode.window.showErrorMessage(
-        `Failed to launch terminal: ${error.message}`,
-      );
-    }
+  const yolo = config.get<boolean>("permissions.yoloMode", false);
+  openTerminal({
+    mode: "cold",
+    cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    yolo,
+    name: "Terminal",
   });
 }
 
@@ -1445,132 +1658,6 @@ function checkSkillsInstalled(): void {
     type: "skillsStatus",
     data: { modesInstalled, plan2cursorInstalled },
   });
-}
-
-function getTerminalLaunchCommand(
-  terminalApp: string,
-  command: string,
-  cwd?: string,
-): string {
-  const platform = process.platform;
-  // Prepend a cd into the workspace directory so the external terminal starts
-  // Claude in the right place (the internal subprocess path passes cwd to spawn,
-  // but external terminals inherit VS Code's cwd otherwise). Single-quote the
-  // path so it survives the later double-quote escaping for AppleScript/bash -c.
-  // The cd command itself is embedded inside an outer `osascript -e '…'` (also
-  // single-quoted), so any literal single quote — including the ones we add
-  // around the path — must be escaped with the POSIX '\'' idiom or the outer
-  // shell parse swallows them, stripping the protective quoting and breaking
-  // paths that contain spaces or shell metacharacters.
-  // Windows is handled separately below since cmd uses a different cd syntax.
-  const quotedCwd = cwd ? `'${cwd.replace(/'/g, `'\\''`)}'` : "";
-  const posixWithCd = cwd ? `cd ${quotedCwd} && ${command}` : command;
-  const escaped = posixWithCd.replace(/"/g, '\\"');
-
-  // The AppleScript-driven terminals (iTerm, Terminal.app) thread the command
-  // through THREE escaping layers: cp.exec's `/bin/sh -c` → `osascript -e '…'` →
-  // AppleScript `"…"` → the terminal's own (already interactive+login) shell.
-  // `do script` / `create window … command` run in a REAL tty, so the profile/rc
-  // are sourced and claude is on PATH — no `/bin/bash <script>` detour needed.
-  //
-  // The ONE bug that historically broke this: the workspace path is wrapped in
-  // single quotes (so spaces/metacharacters survive), and those single quotes
-  // terminate the outer `osascript -e '…'` string early — silently corrupting
-  // the command and leaving the session at ~. The fix is to escape EVERY single
-  // quote in the AppleScript statement with the POSIX '\'' idiom before wrapping
-  // it in `-e '…'`. `asStr` escapes the inner command for the AppleScript
-  // double-quoted string literal; `eArg` escapes a whole statement for the sh
-  // `-e '…'` layer. Both AppleScript terminals share these so the fix can't
-  // drift out of sync. (Verified: a cwd with single quotes / spaces launches
-  // correctly, lands in the workspace, claude on PATH.)
-  const asStr = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const eArg = (stmt: string) => `-e '${stmt.replace(/'/g, `'\\''`)}'`;
-
-  if (platform === "darwin") {
-    if (terminalApp.includes("iTerm")) {
-      // iTerm's scripting application is named "iTerm" (bundle id
-      // com.googlecode.iterm2), NOT "iTerm2" — telling "iTerm2" raises -1728.
-      //
-      // We deliberately do NOT use `create window … command "<cmd>"`: passing the
-      // command as the session's program means iTerm closes the window the moment
-      // that program exits, and with the common profile setting "Close Sessions
-      // On End" the window just flickers and vanishes. Instead we open a normal
-      // default-profile login shell (which stays open) and TYPE the command into
-      // it with `write text`.
-      //
-      // The catch with `write text` is a race: text written before the login
-      // shell finishes sourcing (.bash_profile/.zshrc) gets echoed but never run.
-      // iTerm shell integration exposes `is at shell prompt`, so we WAIT for the
-      // shell to actually reach its prompt, then write — deterministic, no guessed
-      // delay. The `tries` counter bounds the wait (~6s) so that if shell
-      // integration isn't installed (the property never flips true) we still
-      // write the command rather than hang forever.
-      //
-      // Cold-start guard: if iTerm isn't running yet, `launch` it (not `activate`,
-      // which would also restore old windows) and wait until it's scriptable
-      // before creating the window.
-      const writeText = asStr(posixWithCd); // command typed into the live shell
-      const stmts = [
-        `if application "iTerm" is not running then`,
-        `  launch application "iTerm"`,
-        `  repeat until application "iTerm" is running`,
-        `    delay 0.1`,
-        `  end repeat`,
-        `  delay 0.5`,
-        `end if`,
-        `tell application "iTerm"`,
-        `  activate`,
-        `  set newWin to (create window with default profile)`,
-        `  tell current session of newWin`,
-        `    set tries to 0`,
-        `    repeat until (is at shell prompt) or (tries > 60)`,
-        `      delay 0.1`,
-        `      set tries to tries + 1`,
-        `    end repeat`,
-        `    write text "${writeText}"`,
-        `  end tell`,
-        `end tell`,
-      ];
-      return ["osascript", ...stmts.map(eArg)].join(" ");
-    }
-    // For the CLI-launched GUI terminals (kitty/Ghostty), background the launch
-    // with `&` then `open -a` to raise the app — a subprocess spawned by the
-    // extension host doesn't steal focus on macOS otherwise. (Plain `;` would
-    // block on the interactive terminal and never reach the activate.)
-    if (terminalApp.includes("kitty"))
-      return `kitty -- bash -c "${escaped}" & open -a kitty`;
-    if (terminalApp.includes("Ghostty"))
-      return `ghostty -e bash -c "${escaped}" & open -a Ghostty`;
-    if (terminalApp.includes("Warp")) return `open -a Warp --args "${escaped}"`;
-    // Terminal.app: `do script` runs in a real interactive+login tty, so the
-    // command runs for real once the path's single quotes are escaped (above).
-    return [
-      `osascript`,
-      eArg(`tell app "Terminal" to activate`),
-      eArg(`tell app "Terminal" to do script "${asStr(posixWithCd)}"`),
-    ].join(" ");
-  }
-
-  if (platform === "win32") {
-    // Windows Terminal sets the directory via -d; others need a `cd /d` prefix.
-    const winDir = cwd ? `"${cwd}"` : ".";
-    const winEscaped = command.replace(/"/g, '\\"');
-    const winCdPrefix = cwd ? `cd /d "${cwd}" && ` : "";
-    if (terminalApp.includes("Windows Terminal") || terminalApp.includes("wt"))
-      return `wt -d ${winDir} cmd /c "${winEscaped}"`;
-    if (terminalApp.includes("PowerShell") || terminalApp.includes("pwsh")) {
-      const psPrefix = cwd ? `Set-Location -LiteralPath '${cwd}'; ` : "";
-      return `powershell -Command "${psPrefix}${winEscaped}"`;
-    }
-    return `start cmd /c "${winCdPrefix}${winEscaped}"`;
-  }
-
-  if (terminalApp.includes("kitty")) return `kitty -- bash -c "${escaped}"`;
-  if (terminalApp.includes("alacritty"))
-    return `alacritty -e bash -c "${escaped}"`;
-  if (terminalApp.includes("gnome-terminal"))
-    return `gnome-terminal -- bash -c "${escaped}"`;
-  return `xterm -e bash -c "${escaped}"`;
 }
 
 async function openFileInEditor(filePath: string): Promise<void> {

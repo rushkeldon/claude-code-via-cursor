@@ -43,6 +43,8 @@ cursor --install-extension <vsix> --force
 
 Always bump `appcloud9.X` in `package.json` before packaging a new VSIX.
 
+**BBPI** = **bump, build, package, install** — shorthand for the full extension release cycle: bump `appcloud9.X`, `npm run compile`, `npx @vscode/vsce package --no-dependencies`, then `cursor --install-extension <vsix> --force`.
+
 ### Plans must not hard-code a version
 
 Plan files (`*.plan.md`) must **never** name a specific version (e.g. "bump to appcloud9.73"). Always write "bump to the **next** version" instead. The number drifts — multiple agents bump `package.json` independently — so a hard-coded version in a plan goes stale and misleads. The version-bump todo reads the current `appcloud9.X` at execution time and increments it.
