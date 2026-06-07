@@ -1,10 +1,10 @@
 # Claude Code via Cursor
 
-A Cursor / VS Code extension that wraps the **Claude Code CLI** in a rich, editor-native chat interface — think Claude Desktop, but driving your _own_ local `claude`, living inside your editor, with nothing fenced off.
+A Cursor / VS Code extension that wraps the **Claude Code CLI** in a rich, editor-native chat interface — think Claude Desktop, but integrated with Cursor.
 
 Every prompt routes through your locally-authenticated Claude Code session, so it draws from your Claude subscription's shared usage allowance, not Cursor's metered model billing - or (see NOTE) Anthropic's API credits.
 
-NOTE : If ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN) is set anywhere in the environment the CLI launches in, such as your shell config or a settings.json env block, that key takes precedence over your subscription and routes every request to pay-per-token API billing instead. Run /status inside Claude Code to confirm which auth is active; unset ANTHROPIC_API_KEY and restart to fall back to your subscription.
+NOTE : If either ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN are set anywhere in the environment the CLI launches in, such as your shell config or a settings.json (or settings.local.json) env block, that key takes precedence over your subscription and routes every request to pay-per-token API billing instead. Run /status inside Claude Code to confirm which auth is active; unset ANTHROPIC_API_KEY and restart to fall back to your subscription.
 
 ## Why this exists
 
