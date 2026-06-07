@@ -2,7 +2,7 @@
   "name": "claude-code-via-cursor",
   "displayName": "Claude Code via Cursor",
   "description": "Personal fork of Claude Code Chat with the OpenCredits integration removed. Routes only to your local Claude Code.",
-  "version": "3.0.0-appcloud9.111",
+  "version": "3.0.0-appcloud9.141",
   "publisher": "appcloud9",
   "author": "Keldon Rush (appcloud9.com)",
   "repository": {
@@ -182,11 +182,6 @@
           "type": "string",
           "default": "",
           "description": "Default thinking effort/depth (e.g. low, medium, high, xhigh, max). Empty inherits the model's default. Per-session changes from the Effort picker take precedence; available levels are per-model."
-        },
-        "claudeCodeChat.autoContinue": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically nudge a turn that stops producing output without finishing (a dropped turn) with one invisible 'continue' after ~60s of silence. Disable if it ever derails turns. The stall hint and hard-kill backstop are unaffected."
         },
         "claudeCodeChat.permissions.yoloMode": {
           "type": "boolean",

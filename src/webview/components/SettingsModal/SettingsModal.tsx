@@ -42,14 +42,27 @@ function updateSetting(key: string, value: any) {
 
 function WSLSection() {
   const s = fullSettings.value;
+  const detected = detectedTerminals.value;
   if (!s) return null;
+
+  // WSL only does anything on Windows — the `wsl` binary doesn't exist on
+  // macOS/Linux, so the settings are inert there. Hide the whole section unless
+  // we've detected Windows. (detectedTerminals carries platform; it's fetched by
+  // TerminalSection — trigger it here too so this gate resolves even if Terminal
+  // renders after us.)
+  if (!detected) {
+    post({ type: "getDetectedTerminals" } as any);
+  }
+  // Hide until we POSITIVELY confirm Windows — avoids a flash of the WSL section
+  // on macOS/Linux during the moment before detectedTerminals resolves.
+  if (!detected || detected.platform !== "win32") return null;
 
   return (
     <div class="settings-section">
       <h3 class="settings-section-title">WSL Configuration</h3>
       <p class="settings-hint">
-        WSL integration allows you to run Claude Code from within Windows
-        Subsystem for Linux.
+        Detected OS: Windows. WSL integration runs Claude Code from within
+        Windows Subsystem for Linux.
       </p>
       <div class="settings-group">
         <label class="settings-checkbox">
@@ -504,6 +517,14 @@ function SkillsSection() {
 
 const OTHER_TERMINAL = "__other__";
 
+// Human-readable OS name from the detected `process.platform` string.
+function osLabel(platform: string | undefined): string {
+  if (platform === "darwin") return "macOS";
+  if (platform === "win32") return "Windows";
+  if (platform === "linux") return "Linux";
+  return "your system";
+}
+
 function TerminalSection() {
   const s = fullSettings.value;
   const detected = detectedTerminals.value;
@@ -516,6 +537,8 @@ function TerminalSection() {
   const useIntegrated = s["terminal.useIntegrated"];
   const externalApp = s["terminal.externalApp"];
   const terminals = detected?.terminals ?? [];
+  const wslOn = !!s["wsl.enabled"];
+  const os = osLabel(detected?.platform);
   // If a previously-chosen terminal is no longer detected, keep it selectable
   // so the user's stored choice isn't silently dropped.
   const isCustom =
@@ -547,10 +570,41 @@ function TerminalSection() {
           Use integrated terminal
         </label>
 
-        {!useIntegrated && (
+        {!useIntegrated && wslOn && (
+          // WSL mode: the OS app-picker recipes (AppleScript / `open -a`) don't
+          // apply to a `wsl.exe … bash -ic` launch, so we don't enumerate apps.
+          // Hand the user a single command line (the existing customTemplate
+          // plumbing) seeded with a sensible WSL starter.
           <div class="settings-sub-fields">
             <div class="settings-field">
-              <label>External terminal</label>
+              <label>Terminal command (WSL)</label>
+              <input
+                type="text"
+                value={s["terminal.customTemplate"]}
+                placeholder={
+                  'wt.exe -d Ubuntu wsl.exe -d Ubuntu bash -ic "{{command}}"'
+                }
+                onBlur={(e) =>
+                  updateSetting(
+                    "terminal.customTemplate",
+                    (e.target as HTMLInputElement).value,
+                  )
+                }
+              />
+              <p class="settings-field-hint">
+                WSL is on, so terminal launches go through your distro. Provide
+                the shell command to open your terminal; use{" "}
+                <code>{"{{command}}"}</code> where the Claude command is
+                inserted.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!useIntegrated && !wslOn && (
+          <div class="settings-sub-fields">
+            <div class="settings-field">
+              <label>External terminal ({os})</label>
               <select
                 value={isCustom ? OTHER_TERMINAL : externalApp}
                 onChange={(e) =>

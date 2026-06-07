@@ -31,6 +31,7 @@ export type MessageToExtension =
   | { type: 'demoteQueued'; id: string }
   | { type: 'resumeSession'; sessionId?: string }
   | { type: 'forkSession'; sessionId?: string }
+  | { type: 'launchColdTerminal' }
 
 export type MessageFromExtension =
   | { type: 'ready'; data: string }
@@ -46,8 +47,7 @@ export type MessageFromExtension =
   | { type: 'conversationList'; data: any[] }
   | { type: 'imageAttached'; filePath: string; thumbnailUri: string }
   | { type: 'authError'; data: { rawError: string } }
-  | { type: 'processStalled'; data: { sinceLastMs: number } }
-  | { type: 'stallHintClear' }
+  | { type: 'turnActivity'; data: { state: 'opening' | 'active' | 'quiet' | 'done' | 'errored'; kind?: 'thinking' | 'text' | 'tool' | 'compacting' } }
   | { type: 'modelConfig'; data: { model?: string; globalDefault?: string; needsFirstRun: boolean } }
   | { type: 'modelList'; data: { models: Array<{ value: string; displayName?: string; description?: string; supportedEffortLevels?: string[]; supportsAdaptiveThinking?: boolean; supportsEffort?: boolean }>; selected?: string } }
   | { type: 'modelSet'; data: { model: string; ok: boolean; error?: string; deferred?: boolean } }

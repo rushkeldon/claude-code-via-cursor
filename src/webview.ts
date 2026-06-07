@@ -463,6 +463,9 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "launchSlashCommand":
       await launchSlashCommand(message.command, message.forceExternal);
       return;
+    case "launchColdTerminal":
+      launchColdTerminal();
+      return;
     case "installRecommendedSkills":
       installRecommendedSkills();
       return;
@@ -1280,6 +1283,73 @@ async function launchSlashCommand(
   }
 }
 
+// Open a plain "cold" terminal at the workspace root — no claude, no fork, no
+// command. Just a shell in the right directory for ad-hoc work (e.g. running
+// `ca` to re-authenticate). Honors the same integrated-vs-external setting as
+// the breakout, and the same focus/activate handling.
+function launchColdTerminal(): void {
+  log.debug("Webview", "launchColdTerminal", undefined, "➡️");
+  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const useIntegrated = config.get<boolean>("terminal.useIntegrated", true);
+  const workspaceCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+  if (useIntegrated) {
+    // Integrated terminal: VS Code's createTerminal already opens at the
+    // workspace cwd and reveals/focuses the panel on show().
+    const terminal = vscode.window.createTerminal({
+      name: "Terminal",
+      location: { viewColumn: vscode.ViewColumn.One },
+      cwd: workspaceCwd,
+    });
+    terminal.show();
+    return;
+  }
+
+  // External terminal: launch the user's login shell at the workspace dir. We
+  // reuse getTerminalLaunchCommand with the shell itself as the "command" so the
+  // per-app cd + activate (focus) handling all applies.
+  const externalApp = config.get<string>("terminal.externalApp", "");
+  const customTemplate = config.get<string>("terminal.customTemplate", "");
+  // `exec $SHELL -il` drops the user into an INTERACTIVE login shell; the cd is
+  // prepended by getTerminalLaunchCommand via the cwd arg. The `-i` is
+  // load-bearing for the `bash -c` terminals (kitty/Ghostty) — without it a bare
+  // login shell may not stay interactive. (AppleScript `do script` runs in a real
+  // tty so it'd persist regardless, but one form keeps both paths consistent.)
+  const shellCmd = "exec $SHELL -il";
+
+  let launchCmd = "";
+  if (customTemplate) {
+    launchCmd = customTemplate.replace(/\{\{command\}\}/g, shellCmd);
+  } else if (externalApp) {
+    launchCmd = getTerminalLaunchCommand(externalApp, shellCmd, workspaceCwd);
+  } else {
+    // No external app configured — fall back to an integrated terminal so the
+    // button always does something useful.
+    const terminal = vscode.window.createTerminal({
+      name: "Terminal",
+      location: { viewColumn: vscode.ViewColumn.One },
+      cwd: workspaceCwd,
+    });
+    terminal.show();
+    return;
+  }
+
+  log.debug("Webview", "cold terminal launchCmd", { launchCmd }, "🚀");
+  cp.exec(launchCmd, (error) => {
+    if (error) {
+      log.error(
+        "Webview",
+        "cold terminal launch failed",
+        { error: error.message, launchCmd },
+        "💥",
+      );
+      vscode.window.showErrorMessage(
+        `Failed to launch terminal: ${error.message}`,
+      );
+    }
+  });
+}
+
 function installRecommendedSkills(): void {
   log.debug("Webview", "installRecommendedSkills", undefined, "➡️");
   const config = vscode.workspace.getConfiguration("claudeCodeChat");
@@ -1397,53 +1467,88 @@ function getTerminalLaunchCommand(
   const posixWithCd = cwd ? `cd ${quotedCwd} && ${command}` : command;
   const escaped = posixWithCd.replace(/"/g, '\\"');
 
+  // The AppleScript-driven terminals (iTerm, Terminal.app) thread the command
+  // through THREE escaping layers: cp.exec's `/bin/sh -c` → `osascript -e '…'` →
+  // AppleScript `"…"` → the terminal's own (already interactive+login) shell.
+  // `do script` / `create window … command` run in a REAL tty, so the profile/rc
+  // are sourced and claude is on PATH — no `/bin/bash <script>` detour needed.
+  //
+  // The ONE bug that historically broke this: the workspace path is wrapped in
+  // single quotes (so spaces/metacharacters survive), and those single quotes
+  // terminate the outer `osascript -e '…'` string early — silently corrupting
+  // the command and leaving the session at ~. The fix is to escape EVERY single
+  // quote in the AppleScript statement with the POSIX '\'' idiom before wrapping
+  // it in `-e '…'`. `asStr` escapes the inner command for the AppleScript
+  // double-quoted string literal; `eArg` escapes a whole statement for the sh
+  // `-e '…'` layer. Both AppleScript terminals share these so the fix can't
+  // drift out of sync. (Verified: a cwd with single quotes / spaces launches
+  // correctly, lands in the workspace, claude on PATH.)
+  const asStr = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const eArg = (stmt: string) => `-e '${stmt.replace(/'/g, `'\\''`)}'`;
+
   if (platform === "darwin") {
     if (terminalApp.includes("iTerm")) {
-      // iTerm's scripting application is named "iTerm" (bundle id com.googlecode.iterm2),
-      // NOT "iTerm2" — telling "iTerm2" raises -1728. Two further traps, both hit the
-      // hard way and verified by reproduction:
+      // iTerm's scripting application is named "iTerm" (bundle id
+      // com.googlecode.iterm2), NOT "iTerm2" — telling "iTerm2" raises -1728.
       //
-      //   1. `create window ... profile` + `write text "<cmd>"` only TYPES the command —
-      //      it races the new session's login-shell init (nvm/setNodeVer, etc.) and the
-      //      text usually lands at the prompt unsubmitted. `create window ... command`
-      //      runs the program directly (no typing, no race).
-      //   2. The `command` value otherwise threads FOUR quoting layers: cp.exec's
-      //      `/bin/sh -c` → `osascript -e '…'` → AppleScript `"…"` → inner shell. The
-      //      workspace path's own single quotes terminate the outer `-e '…'` early and
-      //      silently corrupt the command (the bug that left the session at ~).
+      // We deliberately do NOT use `create window … command "<cmd>"`: passing the
+      // command as the session's program means iTerm closes the window the moment
+      // that program exits, and with the common profile setting "Close Sessions
+      // On End" the window just flickers and vanishes. Instead we open a normal
+      // default-profile login shell (which stays open) and TYPE the command into
+      // it with `write text`.
       //
-      // We sidestep ALL of it by writing the cd+claude line to a temp script and pointing
-      // iTerm at `/bin/bash <path>`. The AppleScript string then contains only a
-      // space-free temp path — nothing for any layer to corrupt — and the command runs
-      // for real. `exec $SHELL -l` keeps the session interactive after claude exits.
-      const scriptPath = path.join(
-        os.tmpdir(),
-        `claude-iterm-launch-${process.pid}-${Date.now()}.sh`,
-      );
-      try {
-        fs.writeFileSync(scriptPath, `#!/bin/bash\n${posixWithCd}\nexec $SHELL -l\n`, {
-          mode: 0o755,
-        });
-      } catch (e: any) {
-        log.error(
-          "Webview",
-          "failed to write iTerm launch script",
-          { error: e?.message ?? String(e), scriptPath },
-          "💥",
-        );
-      }
-      return [
-        `osascript`,
-        `-e 'tell application "iTerm"'`,
-        `-e 'create window with default profile command "/bin/bash ${scriptPath}"'`,
-        `-e 'end tell'`,
-      ].join(" ");
+      // The catch with `write text` is a race: text written before the login
+      // shell finishes sourcing (.bash_profile/.zshrc) gets echoed but never run.
+      // iTerm shell integration exposes `is at shell prompt`, so we WAIT for the
+      // shell to actually reach its prompt, then write — deterministic, no guessed
+      // delay. The `tries` counter bounds the wait (~6s) so that if shell
+      // integration isn't installed (the property never flips true) we still
+      // write the command rather than hang forever.
+      //
+      // Cold-start guard: if iTerm isn't running yet, `launch` it (not `activate`,
+      // which would also restore old windows) and wait until it's scriptable
+      // before creating the window.
+      const writeText = asStr(posixWithCd); // command typed into the live shell
+      const stmts = [
+        `if application "iTerm" is not running then`,
+        `  launch application "iTerm"`,
+        `  repeat until application "iTerm" is running`,
+        `    delay 0.1`,
+        `  end repeat`,
+        `  delay 0.5`,
+        `end if`,
+        `tell application "iTerm"`,
+        `  activate`,
+        `  set newWin to (create window with default profile)`,
+        `  tell current session of newWin`,
+        `    set tries to 0`,
+        `    repeat until (is at shell prompt) or (tries > 60)`,
+        `      delay 0.1`,
+        `      set tries to tries + 1`,
+        `    end repeat`,
+        `    write text "${writeText}"`,
+        `  end tell`,
+        `end tell`,
+      ];
+      return ["osascript", ...stmts.map(eArg)].join(" ");
     }
-    if (terminalApp.includes("kitty")) return `kitty -- bash -c "${escaped}"`;
+    // For the CLI-launched GUI terminals (kitty/Ghostty), background the launch
+    // with `&` then `open -a` to raise the app — a subprocess spawned by the
+    // extension host doesn't steal focus on macOS otherwise. (Plain `;` would
+    // block on the interactive terminal and never reach the activate.)
+    if (terminalApp.includes("kitty"))
+      return `kitty -- bash -c "${escaped}" & open -a kitty`;
     if (terminalApp.includes("Ghostty"))
-      return `ghostty -e bash -c "${escaped}"`;
+      return `ghostty -e bash -c "${escaped}" & open -a Ghostty`;
     if (terminalApp.includes("Warp")) return `open -a Warp --args "${escaped}"`;
-    return `osascript -e 'tell app "Terminal" to do script "${escaped}"'`;
+    // Terminal.app: `do script` runs in a real interactive+login tty, so the
+    // command runs for real once the path's single quotes are escaped (above).
+    return [
+      `osascript`,
+      eArg(`tell app "Terminal" to activate`),
+      eArg(`tell app "Terminal" to do script "${asStr(posixWithCd)}"`),
+    ].join(" ");
   }
 
   if (platform === "win32") {

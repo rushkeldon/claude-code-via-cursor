@@ -39,6 +39,39 @@ good editor-native UI. We're building our idea of what Anthropic *should* be shi
    *polish* to a casual user and as *this person gets it* to a power user. It's a
    quality bar, not just a feature — guard it fiercely as scope grows.
 
+## The defining distinction: capability parity, not keystroke parity
+
+This is the principle that resolves most "should we build X?" arguments, so it
+gets its own section.
+
+Parity with Claude Code splits into two layers that are easy to conflate:
+
+- **Capability parity (mandatory).** Everything Claude Code *can do*, you can do
+  here. This is non-negotiable — it's wedge #1.
+- **Interaction translation (the whole point).** You do **not** have to reproduce
+  CC's *TTY-keyboard interaction* to honor a capability. You expose the same
+  capability through a **GUI-native affordance**.
+
+The canonical example is `@`. In the CLI, `@` is a TTY affordance: type it, get
+an inline fuzzy file-mention autocomplete. The *capability* is "pull a file into
+context." We honor the capability with a **paperclip button** (click → picker),
+plus drag-drop, plus simply typing a path (which CC's Read tool handles natively)
+— none of which reproduce the `@` keystroke, all of which deliver the capability.
+A clicked button labeled `@` would be the *wrong* translation; the glyph implies
+typing.
+
+The rule that falls out, and the corollary that bounds it:
+
+- **For every CC affordance, identify the *capability*, then ask "what's the
+  GUI-native way to offer it?"** — rather than reproducing the keystroke. Apply
+  this to `!` shell mode, `Shift+Tab` mode cycling, `Ctrl+R` history, etc.
+- **Never create new functionality, and never overload what CC already does.** If
+  CC has it, we drive *CC's* version — its commands, its control protocol, or the
+  slash-command pass-through. We wrap and present; we don't fork behavior or
+  sideload (e.g. hand-writing CC's internal config formats — the predecessor's
+  mistake). The only sanctioned net-new pieces are the two companion skills
+  (`modes`, `plan2cursor`).
+
 ## Design principles (decision tie-breakers)
 
 - **Parity first, polish on top.** When a Claude Code capability has no home in the
@@ -51,12 +84,18 @@ good editor-native UI. We're building our idea of what Anthropic *should* be shi
   than here, that's a bug in our UX, not an acceptable trade-off.
 - **Editor-native, not a bolted-on web app.** Use Cursor/VS Code's own surfaces
   (plans panel, native cards, activity bar) rather than reinventing them.
+- **Translate the keystroke, don't reproduce it.** A TTY affordance (`@`, `!`,
+  `Shift+Tab`) is a *capability* wearing a keyboard costume. Strip the costume,
+  keep the capability, give it a GUI-native affordance. (See the capability-vs-
+  keystroke section above.)
 
 ## Non-goals (for now)
 
 - Not a general multi-provider chat client — this is a Claude Code surface.
 - Not reimplementing Claude Code features that the CLI already does well; we wrap and
-  present, we don't fork behavior.
+  present, we don't fork behavior. No new functionality, no overloading CC, no
+  sideloading its internal config formats — the two companion skills are the only
+  sanctioned net-new pieces.
 - Not chasing distribution/marketplace polish while it's a personal build — get the
   experience right first.
 

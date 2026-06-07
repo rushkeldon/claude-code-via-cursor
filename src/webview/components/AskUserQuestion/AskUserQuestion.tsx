@@ -283,10 +283,10 @@ export function QuestionCard({ data, isResolved }: QuestionCardProps) {
           {!resolved && (
             <div class="ask-question-buttons">
               <button class="ask-question-cancel" type="button" onClick={() => cancelAnswers(data.id, { selections, freeTexts })}>
-                Cancel
+                cancel
               </button>
               <button class="ask-question-submit" type="button" onClick={handleSubmit}>
-                Submit
+                send
               </button>
             </div>
           )}

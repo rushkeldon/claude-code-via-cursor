@@ -32,6 +32,17 @@
   gap: 8px;
   font-weight: 600;
   font-size: 13px;
+
+  &--toggle {
+    cursor: pointer;
+
+    // Tighten the chevron→icon channel: the 8px flex `gap` leaves too much air
+    // after the triangle. Pull the following element (the variant icon) back in
+    // to match the other collapsible headers.
+    .collapsible-chevron {
+      margin-right: -8px;
+    }
+  }
 }
 
 .notice-card-icon {

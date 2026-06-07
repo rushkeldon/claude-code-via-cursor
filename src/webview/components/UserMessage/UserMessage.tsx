@@ -1,7 +1,6 @@
 import { ChatMessage } from "../ChatMessage/ChatMessage";
 import { parseSimpleMarkdown } from "../../markdown";
 import { currentProfile } from "../../state/profile";
-import { CopyButton } from "../CopyButton/CopyButton";
 import { post } from "../../vscode";
 
 interface UserMessageProps {
@@ -17,9 +16,12 @@ export function UserMessage({ content, images }: UserMessageProps) {
     post({ type: "openImageFile", filePath } as any);
   }
 
+  // Header (icon + label) so the message collapses via the shared header
+  // chevron. NOTE: placeholder "❯" icon + standard header for now — the plan is
+  // to thread a slimmer/headerless-but-collapsible treatment later. The header
+  // supplies the copy button, so the old inline user-copy-btn is removed.
   return (
-    <ChatMessage type="user" icon="" label={label} copyText={content}>
-      <CopyButton text={content} title="Copy message" class="user-copy-btn" />
+    <ChatMessage type="user" icon="❯" label={label} copyText={content}>
       <div dangerouslySetInnerHTML={{ __html: parseSimpleMarkdown(content) }} />
       {images && images.length > 0 && (
         <div class="message-images">

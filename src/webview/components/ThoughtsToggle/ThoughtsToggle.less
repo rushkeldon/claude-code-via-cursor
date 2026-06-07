@@ -1,3 +1,5 @@
+@import (reference) "../../styles/mixins.less";
+
 .thoughts-toggle {
   display: inline-flex;
   align-items: center;
@@ -16,7 +18,9 @@
   }
 
   &.active {
-    color: var(--vscode-textLink-foreground);
-    border-color: var(--vscode-textLink-foreground);
+    // Cornflower blue (same token as hyperlinks) — softer on the eye than the
+    // theme's glaring teal link color.
+    color: @link-color;
+    border-color: @link-color;
   }
 }

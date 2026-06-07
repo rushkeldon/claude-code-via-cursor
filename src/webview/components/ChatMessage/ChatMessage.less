@@ -179,10 +179,32 @@
   padding-bottom: 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   position: relative;
+
+  // Collapsible header: whole row is the toggle (matches AskUserQuestion).
+  &--toggle {
+    cursor: pointer;
+
+    &:hover .message-label {
+      color: var(--vscode-foreground);
+    }
+
+    // Chevron placement: nudged ~3px right off the edge. With the card icon
+    // removed, pull the label in tight to the chevron — the header's 8px flex
+    // `gap` left too much air after the triangle. The 10px-wide chevron + 8px gap
+    // read as ~18px of space; margin-right:-8px brings the label back to ~the
+    // 10px channel the tool cards (6px gap) already have. If the icon is ever
+    // restored, revert margin-right to -5px and re-add `.message-icon {
+    // margin-left: 0 }` to re-tighten the chevron→icon channel instead.
+    .collapsible-chevron {
+      margin-left: 3px;
+      margin-right: -8px;
+    }
+  }
 }
 
 // Header copy button (Claude/system messages) sits flush right in the flex row.
-.copy-btn {
+.copy-btn,
+.copy-btn-wrap {
   margin-left: auto;
 }
 

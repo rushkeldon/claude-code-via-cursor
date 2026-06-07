@@ -44,6 +44,22 @@
   min-width: 100px;
 }
 
+// CC's argumentHint, shown inline after the command name as a usage signature.
+.command-autocomplete-args {
+  font-weight: 400;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.8;
+}
+
+// Aliases (e.g. "/reset /new"), shown dim before the skill badge.
+.command-autocomplete-aliases {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
 .command-autocomplete-desc {
   flex: 1;
   color: var(--vscode-descriptionForeground);
@@ -51,6 +67,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.command-autocomplete-loading {
+  padding: 6px 12px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-style: italic;
 }
 
 .command-autocomplete-badge {

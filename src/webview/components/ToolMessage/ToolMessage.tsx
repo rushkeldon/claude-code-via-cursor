@@ -3,6 +3,7 @@ import { ChatMessage } from "../ChatMessage/ChatMessage";
 import { CopyButton } from "../CopyButton/CopyButton";
 import { toolCategory } from "./tool_icons";
 import { post } from "../../vscode";
+import { useCollapsible } from "../Collapsible/useCollapsible";
 
 interface ToolUseMessageProps {
   toolName: string;
@@ -58,25 +59,46 @@ export function ToolUseMessage({
   // the message root), which color BOTH the icon gradient and the accent border.
   const category = toolCategory(toolName);
 
+  // A collapsible body only exists for non-inline tools that actually have
+  // content (Bash output, etc.) — file-path tools already collapse to the inline
+  // one-liner and have no body to fold. So we only show the chevron when there's
+  // a body. Opt ChatMessage out of its own header-collapse (collapsible={false})
+  // since the tool-header owns the toggle here.
+  const hasBody = !!content && !inlinePath;
+  const { displayed, toggle, chevron } = useCollapsible(true);
+
   return (
-    <ChatMessage type="tool" showHeader={false} accent={category}>
-      <div class={`tool-header${inlinePath ? " tool-header--inline" : ""}`}>
-        <div class="tool-icon" />
+    <ChatMessage type="tool" showHeader={false} accent={category} collapsible={false}>
+      <div
+        class={`tool-header${inlinePath ? " tool-header--inline" : ""}${hasBody ? " tool-header--toggle" : ""}`}
+        onClick={hasBody ? toggle : undefined}
+        role={hasBody ? "button" : undefined}
+        title={hasBody ? (displayed ? "Collapse" : "Expand") : undefined}
+      >
+        {hasBody && chevron}
+        {/* Tool icon removed by request — the left-edge category color accent +
+            the tool name are enough; the icon read as clutter. Kept (commented)
+            for a one-line revert. */}
+        {/* <div class="tool-icon" /> */}
         <div class="tool-info">{toolName}</div>
         {inlinePath && (
           // The rtl truncation in CSS clips the START of the path (ellipsis on the
           // left) so the filename stays visible; the path's LTR runs keep order.
           <span
             class="tool-file-link tool-file-link--inline"
-            onClick={() => openFile(filePath)}
+            onClick={(e) => { e.stopPropagation(); openFile(filePath); }}
             title={filePath}
           >
             {filePath}
           </span>
         )}
-        {copyText && <CopyButton text={clipboardValue || ""} />}
+        {copyText && (
+          <span onClick={(e) => e.stopPropagation()}>
+            <CopyButton text={clipboardValue || ""} />
+          </span>
+        )}
       </div>
-      {content && !inlinePath && <pre class="tool-body">{content}</pre>}
+      {hasBody && displayed && <pre class="tool-body">{content}</pre>}
     </ChatMessage>
   );
 }

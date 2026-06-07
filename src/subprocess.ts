@@ -10,6 +10,7 @@ import * as backupRepo from './backupRepo';
 import * as settings from './settings';
 import * as terminalCommands from './terminalCommands';
 import * as sessionLock from './sessionLock';
+import * as turnHealth from './turnHealth';
 import { TITLE_PROMPT, sanitizeTitle } from './sessionTitle';
 import { renamePendingImages, renameSessionImages } from './sessionImages';
 
@@ -89,38 +90,6 @@ let errorOutput = '';
 let lastProcessCumulativeCost = 0;
 let authErrorFired = false;
 
-// ── Stall watchdog (module-scoped; armed only during an active turn) ───────
-// Lives across the warm process's lifetime but only runs while a turn is in
-// flight (armed on send, disarmed on result/abort) so it never SIGTERMs a
-// warm-but-idle process sitting between turns.
-let stallTimer: NodeJS.Timeout | undefined;
-let lastStdoutMs = 0;
-let stallNotified = false;
-let stallKilled = false;
-const STALL_NOTIFY_MS = 30_000;
-const STALL_AUTOCONTINUE_MS = 60_000;
-const STALL_KILL_MS = 120_000;
-
-// ── Auto-continue (dropped-turn recovery) state ────────────────────────────
-// A turn can stop producing output without ever emitting a terminal `result`
-// (the stream goes quiet mid-turn). When that happens we inject ONE invisible
-// "Continue from where you left off." to nudge the turn back to life, capped so
-// we never loop. These are per-turn and reset at turn start / onTurnEnd.
-const AUTO_CONTINUE_MAX = 1;
-let autoContinueCount = 0;
-// True while a tool_use has been seen but its tool_result hasn't arrived — the
-// claude stream is legitimately silent during a long bash/web call, so the 60s
-// auto-continue is suppressed (the 120s kill still applies — a wedged tool is
-// worth killing).
-let toolInFlight = false;
-// True when the most recent `result` ended on a genuine error (is_error / auth /
-// refusal). We must NOT auto-continue a known-bad end — that would re-trigger the
-// same failure in a loop.
-let lastResultWasError = false;
-// True once we've shown the "stalled, couldn't recover" escalation card for the
-// current turn, so it's surfaced at most once. Reset with the other per-turn state.
-let autoContinueEscalated = false;
-
 // ── Outbound control protocol ─────────────────────────────────────────────
 // We send control_requests (initialize, set_model, interrupt, …) to the live
 // process and correlate the matching control_response by request_id. Each
@@ -158,6 +127,8 @@ const AUTH_PATTERNS: RegExp[] = [
 export function init(d: SubprocessDeps): void {
 	log.info('Subprocess', 'init', { hasPostMessage: !!d.postMessage }, '🔧');
 	deps = d;
+	// The turn-health monitor posts turnActivity messages straight to the webview.
+	turnHealth.init(d.postMessage);
 }
 
 let silentQueryCallback: ((text: string) => void) | null = null;
@@ -241,43 +212,6 @@ export function flushPendingSilentQuery(): void {
 		pendingSilentQuery = null;
 		sendSilentQuery(message, callback);
 	}
-}
-
-// Whether the dropped-turn auto-continue is enabled (setting, default on).
-function autoContinueEnabled(): boolean {
-	try {
-		return vscode.workspace
-			.getConfiguration('claudeCodeChat')
-			.get<boolean>('autoContinue', true);
-	} catch {
-		return true;
-	}
-}
-
-// Invisible recovery nudge for a dropped turn (see the stall watchdog). The turn
-// went quiet mid-stream without a terminal `result`; write one "continue" user
-// message straight to stdin to resume it. Deliberately does NOT reuse
-// sendSilentQuery (which early-returns while isProcessing and routes through the
-// awaitingSilentResult guard) and does NOT touch isProcessing / the queue / the
-// UX — the original turn is still in flight; we're resuming it, not starting a new
-// one. Re-arms the watchdog so the resumed turn gets a fresh silence window; the
-// autoContinueCount cap (incremented by the caller) prevents looping.
-function injectContinue(): void {
-	if (!currentClaudeProcess?.stdin) { return; }
-	const userMessage = {
-		type: 'user',
-		session_id: conversation.getCurrentSessionId() || '',
-		message: { role: 'user', content: [{ type: 'text', text: 'Continue from where you left off.' }] },
-		parent_tool_use_id: null
-	};
-	currentClaudeProcess.stdin.write(JSON.stringify(userMessage) + '\n');
-	log.info('Subprocess', 'auto-continue nudge injected', undefined, '↩️');
-	// Drop the "still working" hint and give the resumed turn a fresh window.
-	if (stallNotified) {
-		stallNotified = false;
-		deps?.postMessage({ type: 'stallHintClear' });
-	}
-	armStallWatchdog();
 }
 
 export function getProcess(): cp.ChildProcess | undefined {
@@ -437,21 +371,21 @@ async function runTurn(turn: Turn): Promise<void> {
 	});
 
 	// Decide spawn-vs-reuse. We (re)spawn only when there is no usable live
-	// process, or when plan mode changed (it is a spawn-time --permission-mode
-	// arg, so toggling it requires a fresh process — resumed via --resume).
+	// process, or when Effort/Thoughts changed (they ride spawn-time --settings,
+	// so changing them requires a fresh process — resumed via --resume). Plan mode
+	// no longer triggers a respawn (it's a prompt-injected skill now, not a
+	// --permission-mode arg).
 	const stdinUsable = !!currentClaudeProcess?.stdin && !currentClaudeProcess.stdin.destroyed;
-	const planModeChanged = !!planMode !== !!spawnedPlanMode;
-	// Effort/Thoughts changed since spawn → respawn to re-inject --settings.
 	const thinkingChanged = !!currentClaudeProcess && spawnedThinkingSig !== settings.getThinkingSig();
-	const needSpawn = !currentClaudeProcess || !stdinUsable || planModeChanged || thinkingChanged;
+	const needSpawn = !currentClaudeProcess || !stdinUsable || thinkingChanged;
 
 	if (needSpawn) {
 		if (currentClaudeProcess) {
-			// Stale/closing handle or a plan-mode toggle — reap before respawn so
+			// Stale/closing handle or a thinking-pref change — reap before respawn so
 			// we never have two children attached to the same session at once.
 			// killProcess() clears queuedTurns (correct for an explicit stop), but
 			// here we're mid-drain — preserve any turns still waiting behind this one.
-			log.info('ClaudeProcess', 'respawn required', { planModeChanged, thinkingChanged, stdinUsable }, '♻️');
+			log.info('ClaudeProcess', 'respawn required', { thinkingChanged, stdinUsable }, '♻️');
 			const preserved = queuedTurns;
 			// Mark the abort that killProcess() is about to raise as expected, so
 			// proc.on('error') swallows it silently instead of painting a red card.
@@ -467,7 +401,7 @@ async function runTurn(turn: Turn): Promise<void> {
 			// the failure-path counterpart).
 			respawnInProgress = false;
 			isProcessing = false;
-			disarmStallWatchdog();
+			turnHealth.reset();
 			deps.postMessage({ type: 'setProcessing', data: { isProcessing: false } });
 			return;
 		}
@@ -480,17 +414,14 @@ async function runTurn(turn: Turn): Promise<void> {
 		// Nothing was sent — no `result` will arrive to end the turn, so reset
 		// here rather than leave the UI stuck "working".
 		isProcessing = false;
-		disarmStallWatchdog();
+		turnHealth.reset();
 		deps.postMessage({ type: 'setProcessing', data: { isProcessing: false } });
 		return;
 	}
-	// Fresh turn → reset the per-turn auto-continue state (a prior turn's error or
-	// spent nudge must not carry over and block/skew recovery for this one).
-	autoContinueCount = 0;
-	autoContinueEscalated = false;
-	toolInFlight = false;
-	lastResultWasError = false;
-	armStallWatchdog();
+	// Fresh turn → open the turn-health monitor in its benign `opening` state
+	// (user message written, no stream event yet). The monitor owns the
+	// awaiting-tool state internally.
+	turnHealth.beginTurn();
 }
 
 // Spawn one long-lived `claude` for this session and wire its handlers. Returns
@@ -531,9 +462,11 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		}
 	}
 
-	if (planMode) {
-		args.push('--permission-mode', 'plan');
-	}
+	// Plan mode is no longer driven via --permission-mode plan. The Plan button is
+	// now a prompt-injector for the `modes` skill (which produces a Cursor *.plan.md);
+	// CC's native plan mode blocks ALL writes (even the plan file), so we never use
+	// it. The planMode parameter is retained as inert (always false) to avoid
+	// churning the queue/demote threading; intentionally no spawn arg here.
 
 	// Launch-injection from extension-owned storage (build-to-contract). --model
 	// overrides settings.local.json; --settings injects the advertised thinking
@@ -663,7 +596,6 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 
 	if (proc.stdout) {
 		proc.stdout.on('data', (data) => {
-			lastStdoutMs = Date.now();
 			rawOutput += data.toString();
 
 			const lines = rawOutput.split('\n');
@@ -717,7 +649,7 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 			return;
 		}
 
-		disarmStallWatchdog();
+		turnHealth.reset();
 		rejectAllPendingControl('process closed');
 		sessionLock.release();
 		// Drop deferred actions tied to this dead process so they don't fire on a
@@ -793,7 +725,7 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 			return;
 		}
 
-		disarmStallWatchdog();
+		turnHealth.reset();
 		rejectAllPendingControl('process error');
 		sessionLock.release();
 		pendingSettingsRestart = false;
@@ -935,13 +867,24 @@ const BUILTIN_COMMANDS = new Set([
 	'memory', 'permissions',
 ]);
 
-interface WebviewCommand { name: string; description: string; type: 'builtin' | 'skill'; }
+interface WebviewCommand {
+	name: string;
+	description: string;
+	type: 'builtin' | 'skill';
+	// CC's own param-usage hint (e.g. "[model]", "<optional instructions>") and
+	// any aliases — both arrive in the initialize handshake. Surfaced in the
+	// palette so rows show a usage signature, not just name + description.
+	argumentHint?: string;
+	aliases?: string[];
+}
 
 function mapCommandForWebview(c: any): WebviewCommand {
 	return {
 		name: c?.name ?? '',
 		description: c?.description ?? '',
 		type: BUILTIN_COMMANDS.has(c?.name) ? 'builtin' : 'skill',
+		argumentHint: typeof c?.argumentHint === 'string' && c.argumentHint.trim() ? c.argumentHint.trim() : undefined,
+		aliases: Array.isArray(c?.aliases) && c.aliases.length ? c.aliases : undefined,
 	};
 }
 
@@ -1122,107 +1065,9 @@ async function writeUserTurn(actualMessage: string, images?: Array<string | { fi
 	return true;
 }
 
-// ── Stall watchdog (armed per turn, lives across the warm process) ─────────
-// Arms when a turn is sent; disarms on result/abort. It never runs between
-// turns, so a warm-but-idle process is never SIGTERM'd for "inactivity".
-function armStallWatchdog(): void {
-	disarmStallWatchdog();
-	lastStdoutMs = Date.now();
-	stallNotified = false;
-	stallKilled = false;
-	stallTimer = setInterval(() => {
-		// NOTE: per-turn auto-continue state (autoContinueCount, toolInFlight,
-		// lastResultWasError) is reset at turn start in runTurn() and on a real
-		// result in onTurnEnd() — NOT here, because armStallWatchdog is also called
-		// by injectContinue() to give a resumed turn a fresh silence window, and
-		// resetting the count there would defeat the cap.
-		if (!deps || !currentClaudeProcess || authErrorFired || stallKilled) {
-			disarmStallWatchdog();
-			return;
-		}
-		if (permissions.hasPending()) {
-			lastStdoutMs = Date.now();
-			if (stallNotified) {
-				stallNotified = false;
-				deps.postMessage({ type: 'stallHintClear' });
-			}
-			return;
-		}
-		const silentFor = Date.now() - lastStdoutMs;
-		if (!stallNotified && silentFor > STALL_NOTIFY_MS) {
-			stallNotified = true;
-			log.warn('StallWatchdog', 'stall notified', { silentFor }, '⏳');
-			deps.postMessage({
-				type: 'processStalled',
-				data: { sinceLastMs: silentFor }
-			});
-		}
-		// Auto-continue stage (60s): the turn went quiet mid-stream without a
-		// terminal `result`. Inject ONE invisible "continue" nudge to recover a
-		// dropped turn — but only when it's safe to: feature enabled, a turn is
-		// actually in flight, not waiting on a tool, the last result wasn't a real
-		// error, the user didn't just Stop, and we haven't already used the cap.
-		if (
-			silentFor > STALL_AUTOCONTINUE_MS &&
-			autoContinueEnabled() &&
-			isProcessing &&
-			!toolInFlight &&
-			!lastResultWasError &&
-			!userRequestedStop &&
-			autoContinueCount < AUTO_CONTINUE_MAX
-		) {
-			autoContinueCount++;
-			log.warn('StallWatchdog', 'auto-continue firing', { silentFor, attempt: autoContinueCount }, '↩️');
-			injectContinue();   // writes the nudge to stdin + re-arms (fresh window)
-			return;
-		}
-		// Escalation: we already spent the auto-continue cap and the turn STILL went
-		// quiet past the auto-continue window — surface a visible card once so the
-		// user isn't left silently stuck (the 120s kill remains the final backstop).
-		if (
-			silentFor > STALL_AUTOCONTINUE_MS &&
-			autoContinueCount >= AUTO_CONTINUE_MAX &&
-			!autoContinueEscalated &&
-			autoContinueEnabled() &&
-			!toolInFlight &&
-			!lastResultWasError
-		) {
-			autoContinueEscalated = true;
-			log.warn('StallWatchdog', 'auto-continue cap exhausted — escalating', { silentFor }, '⚠️');
-			conversation.sendAndSaveMessage({
-				type: 'notice',
-				data: {
-					title: 'Turn stalled',
-					content: 'The turn went quiet and an automatic nudge didn\'t recover it. The session is still active — send a message to continue, or Stop to reset.',
-					variant: 'warning'
-				}
-			});
-		}
-		if (silentFor > STALL_KILL_MS) {
-			stallKilled = true;
-			const proc = currentClaudeProcess;
-			log.error('StallWatchdog', 'stall killed', { silentFor, pid: proc?.pid }, '☠️');
-			deps.postMessage({
-				type: 'processKilled',
-				data: { reason: 'inactivity', silentMs: silentFor }
-			});
-			try { proc?.kill('SIGTERM'); } catch { /* already dead */ }
-			setTimeout(() => {
-				try { proc?.kill('SIGKILL'); } catch { /* already dead */ }
-			}, 2_000);
-			disarmStallWatchdog();
-		}
-	}, 5_000);
-}
-
-function disarmStallWatchdog(): void {
-	if (stallTimer) { clearInterval(stallTimer); stallTimer = undefined; }
-	stallNotified = false;
-}
-
 // Called when a turn completes (the `result` event). Flips processing off,
-// disarms the watchdog, flushes a pending silent query, then drains one queued
-// user turn (if any) against the still-warm process.
+// resets the turn-health monitor, flushes a pending silent query, then drains
+// one queued user turn (if any) against the still-warm process.
 function onTurnEnd(): void {
 	if (!deps) { return; }
 
@@ -1244,18 +1089,10 @@ function onTurnEnd(): void {
 	userPausedSession = null;
 
 	isProcessing = false;
-	disarmStallWatchdog();
-	// If an auto-continue nudge was used this turn and we still reached a real
-	// result, the recovery worked — log it (greppable alongside the firing line).
-	if (autoContinueCount > 0) {
-		log.info('Subprocess', 'auto-continue recovered turn', { attempts: autoContinueCount }, '✅');
-	}
-	// Turn genuinely ended → clear the per-turn auto-continue state so the next
-	// turn starts clean (also covered by runTurn, but this catches turns that end
-	// without a fresh runTurn, e.g. the last in a drained queue).
-	autoContinueCount = 0;
-	autoContinueEscalated = false;
-	toolInFlight = false;
+	// Turn genuinely ended → close the turn-health monitor (→ done/idle). Also
+	// covered by runTurn, but this catches turns that end without a fresh runTurn
+	// (e.g. the last in a drained queue).
+	turnHealth.endTurn();
 	deps.postMessage({ type: 'setProcessing', data: { isProcessing: false } });
 	flushPendingSilentQuery();
 
@@ -1381,16 +1218,28 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 		case 'stream_event': {
 			const ev = jsonData.event;
 			if (!ev) { break; }
-			if (ev.type === 'content_block_start' && ev.content_block) {
+			// Every stream_event is a turn-health heartbeat. We feed ALL of them to
+			// the monitor — including text_delta, input_json_delta (tool-arg assembly)
+			// and message_start, which the old design dropped, making healthy turns
+			// look "silent" to the wall-clock watchdog.
+			if (ev.type === 'message_start') {
+				turnHealth.signal('message_start');
+			} else if (ev.type === 'content_block_start' && ev.content_block) {
 				const blockType = ev.content_block.type;
 				log.debug('StreamParser', 'content_block_start', { blockType, index: ev.index }, '🧱');
 				if (blockType === 'thinking') {
+					turnHealth.signal('thinking_start');
 					log.info('StreamParser', 'thinkingBlockStart sent', undefined, '🧠');
 					deps.postMessage({ type: 'thinkingBlockStart' });
+				} else if (blockType === 'tool_use') {
+					turnHealth.signal('tool_use');
+				} else {
+					turnHealth.signal('text_start');
 				}
 			} else if (ev.type === 'content_block_delta' && ev.delta) {
 				const deltaType = ev.delta.type;
 				if (deltaType === 'thinking_delta') {
+					turnHealth.signal('thinking_delta');
 					const chunk = ev.delta.thinking;
 					if (typeof chunk === 'string' && chunk.length > 0) {
 						log.debug('StreamParser', 'thinkingDelta sent', { chunkLen: chunk.length, chunkSnippet: chunk }, '🧠');
@@ -1398,7 +1247,13 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 					} else {
 						log.warn('StreamParser', 'thinking_delta has empty chunk', { deltaKeys: Object.keys(ev.delta) }, '🤔');
 					}
-				} else if (deltaType && deltaType !== 'text_delta' && deltaType !== 'input_json_delta') {
+				} else if (deltaType === 'text_delta') {
+					turnHealth.signal('text_delta');
+				} else if (deltaType === 'input_json_delta') {
+					// Tool args being composed — often long and otherwise silent. This is
+					// the heartbeat that most often broke the old watchdog.
+					turnHealth.signal('tool_use');
+				} else if (deltaType) {
 					// Unknown delta types — surface so we notice if Anthropic adds a new one
 					log.warn('StreamParser', 'unknown content_block_delta type', { deltaType, deltaKeys: Object.keys(ev.delta) }, '🤔');
 				}
@@ -1433,6 +1288,7 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 				});
 			} else if (jsonData.subtype === 'status') {
 				if (jsonData.status === 'compacting') {
+					turnHealth.signal('compacting');
 					conversation.sendAndSaveMessage({
 						type: 'compacting',
 						data: { isCompacting: true }
@@ -1505,10 +1361,10 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 						});
 					} else if (content.type === 'tool_use') {
 						// A tool is now running; the claude stream legitimately goes quiet
-						// until its tool_result returns. Suppress the 60s auto-continue while
-						// this is true (see armStallWatchdog) — the turn isn't dropped, the
-						// tool is just working.
-						toolInFlight = true;
+						// until its tool_result returns. The turn-health monitor treats a
+						// turn awaiting a tool_result as active/benign (not quiet) — the
+						// turn isn't dropped, the tool is just working.
+						turnHealth.signal('tool_use');
 						const toolInfo = `🔧 Executing: ${content.name}`;
 						let toolInput = '';
 						let fileContentBefore: string | undefined;
@@ -1582,10 +1438,10 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 			if (jsonData.message && jsonData.message.content) {
 				for (const content of jsonData.message.content) {
 					if (content.type === 'tool_result') {
-						// Tool finished — the stream may now legitimately go quiet while
-						// the model thinks about the result. Clear the in-flight flag so a
-						// genuinely dropped turn after this point can be auto-continued.
-						toolInFlight = false;
+						// Tool finished — its arrival is a heartbeat (and the turn may now
+						// legitimately go quiet while the model thinks about the result).
+						// The monitor clears its awaiting-tool state and re-arms the debounce.
+						turnHealth.signal('tool_result');
 						let resultContent = content.content || 'Tool executed successfully';
 
 						if (typeof resultContent === 'object' && resultContent !== null) {
@@ -1645,11 +1501,12 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 			break;
 
 		case 'result':
-			// Record whether this turn ended on a genuine error so the auto-continue
-			// watchdog won't try to "recover" a known-bad end (which would just loop
-			// the same failure). A non-'success' subtype (e.g. error_during_execution)
-			// or an is_error success both count as error ends.
-			lastResultWasError = jsonData.subtype !== 'success' || !!jsonData.is_error;
+			// A non-'success' subtype (e.g. error_during_execution) or an is_error
+			// success both count as error ends; tell the turn-health monitor so the
+			// indicator resolves to `error` rather than a clean `done`.
+			if (jsonData.subtype !== 'success' || jsonData.is_error) {
+				turnHealth.signal('error');
+			}
 			if (jsonData.subtype === 'success') {
 				if (jsonData.is_error && jsonData.result && (
 					jsonData.result.includes('Invalid API key') ||
@@ -1745,10 +1602,10 @@ function handleLoginRequired(): void {
 	if (!deps) { return; }
 
 	// Login failure ends the turn; clear any queued turns since they would also
-	// fail, and disarm the watchdog.
+	// fail, and reset the turn-health monitor.
 	queuedTurns = [];
 	emitQueueState();
-	disarmStallWatchdog();
+	turnHealth.reset();
 	isProcessing = false;
 
 	deps.postMessage({
@@ -1807,7 +1664,7 @@ export async function killProcess(): Promise<void> {
 	cachedModels = undefined;
 	cachedCommands = undefined;
 	pendingModelSwitch = undefined;
-	disarmStallWatchdog();
+	turnHealth.reset();
 	rejectAllPendingControl('process killed');
 	sessionLock.release();
 
@@ -1848,7 +1705,7 @@ export async function stopProcess(): Promise<void> {
 	if (!currentClaudeProcess || !isProcessing) {
 		// Nothing in flight — just normalize UI state.
 		isProcessing = false;
-		disarmStallWatchdog();
+		turnHealth.reset();
 		deps.postMessage({ type: 'setProcessing', data: { isProcessing: false } });
 		deps.postMessage({ type: 'clearLoading' });
 		return;
@@ -1925,10 +1782,11 @@ export async function sendNow(): Promise<void> {
 	try {
 		await sendControlRequest('interrupt', {});
 		log.info('Subprocess', 'sendNow interrupt acked — head will flush via onTurnEnd', undefined, '⏭️');
-		conversation.sendAndSaveMessage({
-			type: 'notice',
-			data: { title: 'Interrupted', content: 'Running the queued prompt now.', variant: 'warning' }
-		});
+		// No notice here: "send queued prompt now" is a deliberate user action —
+		// they interrupted the in-flight turn on purpose and know a queued prompt
+		// is going out. Surfacing "Interrupted / running the queued prompt now"
+		// (and, previously, "turn ended without a result") just added alarm to a
+		// normal action. The Stop button still shows its own "Stopped" card.
 		// Fallback: if the CLI doesn't emit a `result` after the interrupt acks,
 		// isProcessing would stick true and the head would never drain. Force a
 		// turn-end after a short grace period if we're still marked processing.
@@ -1936,17 +1794,14 @@ export async function sendNow(): Promise<void> {
 		setTimeout(() => {
 			if (isProcessing && currentClaudeProcess === procAtInterrupt) {
 				log.warn('Subprocess', 'no result after sendNow interrupt — forcing turn end', undefined, '⏱️');
-				// Surface the anomaly — interrupt acked but no `result` arrived, so we
-				// force the turn end to drain the queued head. Tell the user why there
-				// was a gap; the queued prompt still runs next.
-				conversation.sendAndSaveMessage({
-					type: 'notice',
-					data: {
-						title: 'Turn ended without a result',
-						content: 'Claude acknowledged the interrupt but never returned a result, so the turn was force-ended. Running your queued prompt now.',
-						variant: 'warning'
-					}
-				});
+				// EXPECTED path, not an anomaly: the user chose "send now", which
+				// interrupts the in-flight turn. The CLI often acks the interrupt
+				// without emitting a terminal `result`, so we force the turn end to
+				// drain the queued head — but we DON'T surface a scary "turn ended
+				// without a result" card. The user already saw the "Interrupted —
+				// running the queued prompt now" notice and knows they inserted a
+				// prompt mid-flow; Claude reliably picks up from context. (The notice
+				// only added alarm to a normal, user-initiated action.)
 				onTurnEnd();
 			}
 		}, 6_000);
@@ -2043,7 +1898,7 @@ export function forceShutdown(): void {
 	queuedTurns = [];
 	cachedModels = undefined;
 	cachedCommands = undefined;
-	disarmStallWatchdog();
+	turnHealth.reset();
 	rejectAllPendingControl('force shutdown');
 	sessionLock.release();
 	if (typeof pid === 'number' && pid > 0) {

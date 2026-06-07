@@ -1,5 +1,6 @@
 import './NoticeCard.less';
 import { ComponentChildren } from 'preact';
+import { useCollapsible } from '../Collapsible/useCollapsible';
 
 export type NoticeVariant = 'warning' | 'info' | 'success';
 
@@ -17,13 +18,24 @@ export function NoticeCard({ variant = 'warning', icon, title, children }: Notic
     success: '✅',
   };
 
+  // Only collapsible when there's a body to fold — a title-only notice gets no
+  // chevron (no toggle that does nothing).
+  const hasBody = !!children;
+  const { displayed, toggle, chevron } = useCollapsible(true);
+
   return (
     <div class={`notice-card notice-card--${variant}`}>
-      <div class="notice-card-header">
+      <div
+        class={`notice-card-header${hasBody ? ' notice-card-header--toggle' : ''}`}
+        onClick={hasBody ? toggle : undefined}
+        role={hasBody ? 'button' : undefined}
+        title={hasBody ? (displayed ? 'Collapse' : 'Expand') : undefined}
+      >
+        {hasBody && chevron}
         <span class="notice-card-icon">{icon || defaultIcons[variant]}</span>
         <span class="notice-card-title">{title}</span>
       </div>
-      {children && <div class="notice-card-body">{children}</div>}
+      {hasBody && displayed && <div class="notice-card-body">{children}</div>}
     </div>
   );
 }

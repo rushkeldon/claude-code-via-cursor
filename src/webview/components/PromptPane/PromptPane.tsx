@@ -1,17 +1,17 @@
-import './PromptPane.less';
-import { signal } from '@preact/signals';
-import { useState, useRef, useEffect } from 'preact/hooks';
-import { post, on } from '../../vscode';
-import { processing } from '../../state/session';
-import { commandList } from '../../state/commands';
-import { ModelSelector } from '../ModelSelector/ModelSelector';
-import { EffortPicker } from '../EffortPicker/EffortPicker';
-import { ThoughtsToggle } from '../ThoughtsToggle/ThoughtsToggle';
-import { DroppedFile } from '../DroppedFile/DroppedFile';
-import { CommandAutocomplete } from '../CommandAutocomplete/CommandAutocomplete';
-import { slashCommandsVisible } from '../SlashCommands/SlashCommands';
-import { QueuedPrompt } from '../QueuedPrompt/QueuedPrompt';
-import { pendingQuestions } from '../AskUserQuestion/AskUserQuestion';
+import "./PromptPane.less";
+import { signal } from "@preact/signals";
+import { useState, useRef, useEffect } from "preact/hooks";
+import { post, on } from "../../vscode";
+import { processing } from "../../state/session";
+import { commandList } from "../../state/commands";
+import { ModelSelector } from "../ModelSelector/ModelSelector";
+import { EffortPicker } from "../EffortPicker/EffortPicker";
+import { ThoughtsToggle } from "../ThoughtsToggle/ThoughtsToggle";
+import { DroppedFile } from "../DroppedFile/DroppedFile";
+import { CommandAutocomplete } from "../CommandAutocomplete/CommandAutocomplete";
+import { slashCommandsVisible } from "../SlashCommands/SlashCommands";
+import { QueuedPrompt } from "../QueuedPrompt/QueuedPrompt";
+import { pendingQuestions } from "../AskUserQuestion/AskUserQuestion";
 
 export interface DroppedFileData {
   filePath: string;
@@ -21,45 +21,58 @@ export interface DroppedFileData {
 
 const planMode = signal(false);
 const terminalMode = signal(false);
-const terminalInput = signal('');
+const terminalInput = signal("");
 const images = signal<Array<{ filePath: string; previewUri: string }>>([]);
 const droppedFiles = signal<DroppedFileData[]>([]);
-const connectMenuOpen = signal(false);
 
 // A queued prompt the user demoted (⬇) back into the input. Carries the text +
 // flags so the textarea + plan/thinking toggles can repopulate. Consumed (and
 // cleared) by an effect in PromptPane once applied to the live textarea.
-const pendingDemote = signal<{ message: string; planMode: boolean } | null>(null);
+const pendingDemote = signal<{ message: string; planMode: boolean } | null>(
+  null,
+);
 
 // Transient hint shown under the input when Send is blocked because a question
 // is pending (Phase C). Cleared on the next keystroke or when no question pends.
 const sendBlockedHint = signal(false);
 
-on('imageAttached' as any, (msg: any) => {
-  images.value = [...images.value, { filePath: msg.filePath, previewUri: msg.previewUri || msg.thumbnailUri }];
+on("imageAttached" as any, (msg: any) => {
+  images.value = [
+    ...images.value,
+    { filePath: msg.filePath, previewUri: msg.previewUri || msg.thumbnailUri },
+  ];
 });
 
-on('queuedDemoted' as any, (msg: any) => {
+on("queuedDemoted" as any, (msg: any) => {
   const data = msg.data || {};
   // Restore images immediately (their own signal); the text + flags are applied
   // to the ref-based textarea by the effect below.
   if (Array.isArray(data.images) && data.images.length > 0) {
     images.value = [
       ...images.value,
-      ...data.images.map((img: any) => ({ filePath: img.filePath, previewUri: img.previewUri || '' })),
+      ...data.images.map((img: any) => ({
+        filePath: img.filePath,
+        previewUri: img.previewUri || "",
+      })),
     ];
   }
   pendingDemote.value = {
-    message: data.message || '',
+    message: data.message || "",
     planMode: !!data.planMode,
   };
 });
 
-on('fileDropped' as any, (msg: any) => {
+on("fileDropped" as any, (msg: any) => {
   const data = msg.data;
-  droppedFiles.value = [...droppedFiles.value, { filePath: data.filePath, contents: data.contents, language: data.language }];
+  droppedFiles.value = [
+    ...droppedFiles.value,
+    {
+      filePath: data.filePath,
+      contents: data.contents,
+      language: data.language,
+    },
+  ];
 });
-
 
 export function PromptPane() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -74,7 +87,9 @@ export function PromptPane() {
     if (textarea) {
       // Prepend so we don't clobber anything the user already started typing.
       const existing = textarea.value;
-      textarea.value = existing ? `${demote.message}\n${existing}` : demote.message;
+      textarea.value = existing
+        ? `${demote.message}\n${existing}`
+        : demote.message;
       autoResize(textarea);
       textarea.focus();
       const end = textarea.value.length;
@@ -88,26 +103,34 @@ export function PromptPane() {
   // applies — drop it so a stale "answer the question first" doesn't linger.
   const hasPendingQuestion = pendingQuestions.value.length > 0;
   useEffect(() => {
-    if (!hasPendingQuestion && sendBlockedHint.value) sendBlockedHint.value = false;
+    if (!hasPendingQuestion && sendBlockedHint.value)
+      sendBlockedHint.value = false;
   }, [hasPendingQuestion]);
 
   function sendMessage() {
     const textarea = textareaRef.current;
     if (!textarea) return;
     const userText = textarea.value.trim();
-    if (!userText && images.value.length === 0 && droppedFiles.value.length === 0) return;
+    if (
+      !userText &&
+      images.value.length === 0 &&
+      droppedFiles.value.length === 0
+    )
+      return;
 
     // Phase C — block-with-hint: while a question/permission is pending the turn
     // can't end on its own, so a queued prompt behind it would be trapped. Don't
     // silently queue; hint the user to answer the question and point at its card.
     if (pendingQuestions.value.length > 0) {
       sendBlockedHint.value = true;
-      const card = document.querySelector('.ask-user-question:not(.decided)') || document.querySelector('.ask-user-question');
-      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const card =
+        document.querySelector(".ask-user-question:not(.decided)") ||
+        document.querySelector(".ask-user-question");
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
 
-    let text = '';
+    let text = "";
     if (droppedFiles.value.length > 0) {
       for (const f of droppedFiles.value) {
         text += `File: ${f.filePath}\n\n\`\`\`${f.language}\n${f.contents}\n\`\`\`\n\n`;
@@ -116,36 +139,45 @@ export function PromptPane() {
     text += userText;
 
     post({
-      type: 'sendMessage',
+      type: "sendMessage",
       text,
       planMode: planMode.value,
       images: images.value.length > 0 ? images.value : undefined,
     });
 
-    textarea.value = '';
+    textarea.value = "";
     images.value = [];
     droppedFiles.value = [];
     autoResize(textarea);
+
+    // If we were in pass-through (terminal/green) mode — e.g. the user typed a
+    // /command then hit the Send button rather than Enter — clear that state too.
+    // Without this the textarea empties but the green border + placeholder linger
+    // because nothing resets terminalMode (handleInput only fires on real typing).
+    if (terminalMode.value) {
+      terminalMode.value = false;
+      terminalInput.value = "";
+    }
   }
 
   function stopRequest() {
     // Graceful stop: interrupt the turn, keep the process warm.
-    post({ type: 'stopRequest' } as any);
+    post({ type: "stopRequest" } as any);
   }
 
   function skullRequest() {
     // Hard kill: terminate the process group + park to history.
-    post({ type: 'skull' } as any);
+    post({ type: "skull" } as any);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
     if (terminalMode.value) {
-      if (e.key === 'Escape') {
+      if (e.key === "Escape") {
         e.preventDefault();
         exitTerminalMode();
         return;
       }
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         executeTerminalCommand();
         return;
@@ -153,7 +185,7 @@ export function PromptPane() {
       return;
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
@@ -166,34 +198,38 @@ export function PromptPane() {
     if (sendBlockedHint.value) sendBlockedHint.value = false;
 
     if (terminalMode.value) {
-      if (!textarea.value.startsWith('/')) {
+      if (!textarea.value.startsWith("/")) {
         exitTerminalMode();
         return;
       }
       terminalInput.value = textarea.value;
-    } else if (textarea.value === '/' && textarea.selectionStart === 1) {
+    } else if (textarea.value === "/" && textarea.selectionStart === 1) {
       enterTerminalMode();
     }
   }
 
   function enterTerminalMode() {
     terminalMode.value = true;
-    terminalInput.value = '/';
-    post({ type: 'fetchCommandList' } as any);
+    terminalInput.value = "/";
+    post({ type: "fetchCommandList" } as any);
   }
 
   function exitTerminalMode() {
     terminalMode.value = false;
-    terminalInput.value = '';
+    terminalInput.value = "";
     const textarea = textareaRef.current;
     if (textarea) {
-      textarea.value = '';
+      textarea.value = "";
       autoResize(textarea);
     }
   }
 
   function executeTerminalCommand() {
-    const command = (terminalInput.value || textareaRef.current?.value || '').trim();
+    const command = (
+      terminalInput.value ||
+      textareaRef.current?.value ||
+      ""
+    ).trim();
     if (!command) return;
     // Raw pass-through over the existing stream-json stdin channel — the same
     // path a normal message takes. No denylist: the CLI's headless initialize
@@ -201,7 +237,7 @@ export function PromptPane() {
     // is safe to send inline. The toolbar breakout (below) stays as a manual,
     // on-demand fork for anyone who deliberately wants a real terminal.
     post({
-      type: 'sendMessage',
+      type: "sendMessage",
       text: command,
       planMode: planMode.value,
     });
@@ -218,31 +254,40 @@ export function PromptPane() {
   }
 
   function autoResize(el: HTMLTextAreaElement) {
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
   }
 
-  function togglePlan() {
-    planMode.value = !planMode.value;
-    if (planMode.value) {
-      post({ type: 'showInfoMessage', message: 'Plan mode enabled — Claude will plan before making changes.' } as any);
-    }
+  // The Plan button is a prompt-injector, not a toggle: it drops the modes-skill
+  // command into the input (focused, cursor at end) and does NOT send. The user
+  // can edit the target dir, then send it themselves. This drives the `modes`
+  // skill (which produces a Cursor-compatible *.plan.md) rather than CC's native
+  // --permission-mode plan, and teaches the underlying command by revealing it.
+  function injectPlanCommand() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const cmd = "/modes plan ./doc";
+    textarea.value = cmd;
+    autoResize(textarea);
+    // Enter green pass-through mode just as typing "/" does — the button injects
+    // a command, so the input should LOOK like a command (green border, command
+    // placeholder, autocomplete, Enter = raw pass-through). Setting textarea.value
+    // fires no input event, so handleInput never runs; flip the signals ourselves
+    // and fetch the command list (parity with enterTerminalMode).
+    terminalMode.value = true;
+    terminalInput.value = cmd;
+    post({ type: "fetchCommandList" } as any);
+    textarea.focus();
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
   }
 
   function selectImage() {
-    post({ type: 'selectImageFile' } as any);
+    post({ type: "selectImageFile" } as any);
   }
 
   function removeImage(index: number) {
     images.value = images.value.filter((_, i) => i !== index);
-  }
-
-  function toggleConnectMenu() {
-    connectMenuOpen.value = !connectMenuOpen.value;
-  }
-
-  function hideConnectMenu() {
-    connectMenuOpen.value = false;
   }
 
   useEffect(() => {
@@ -258,39 +303,44 @@ export function PromptPane() {
           const targetScale = thumbWidth / img.width;
           const targetHeight = Math.round(img.height * targetScale);
 
-          let currentCanvas = document.createElement('canvas');
+          let currentCanvas = document.createElement("canvas");
           currentCanvas.width = img.width;
           currentCanvas.height = img.height;
-          let ctx = currentCanvas.getContext('2d')!;
+          let ctx = currentCanvas.getContext("2d")!;
           ctx.drawImage(img, 0, 0);
 
           let currentWidth = img.width;
           let currentHeight = img.height;
 
           while (currentWidth > thumbWidth * 1.5) {
-            const nextWidth = Math.max(thumbWidth, Math.round(currentWidth * 0.5));
-            const nextHeight = Math.round((nextWidth / currentWidth) * currentHeight);
-            const nextCanvas = document.createElement('canvas');
+            const nextWidth = Math.max(
+              thumbWidth,
+              Math.round(currentWidth * 0.5),
+            );
+            const nextHeight = Math.round(
+              (nextWidth / currentWidth) * currentHeight,
+            );
+            const nextCanvas = document.createElement("canvas");
             nextCanvas.width = nextWidth;
             nextCanvas.height = nextHeight;
-            const nextCtx = nextCanvas.getContext('2d')!;
+            const nextCtx = nextCanvas.getContext("2d")!;
             nextCtx.imageSmoothingEnabled = true;
-            nextCtx.imageSmoothingQuality = 'high';
+            nextCtx.imageSmoothingQuality = "high";
             nextCtx.drawImage(currentCanvas, 0, 0, nextWidth, nextHeight);
             currentCanvas = nextCanvas;
             currentWidth = nextWidth;
             currentHeight = nextHeight;
           }
 
-          const finalCanvas = document.createElement('canvas');
+          const finalCanvas = document.createElement("canvas");
           finalCanvas.width = thumbWidth;
           finalCanvas.height = targetHeight;
-          const finalCtx = finalCanvas.getContext('2d')!;
+          const finalCtx = finalCanvas.getContext("2d")!;
           finalCtx.imageSmoothingEnabled = true;
-          finalCtx.imageSmoothingQuality = 'high';
+          finalCtx.imageSmoothingQuality = "high";
           finalCtx.drawImage(currentCanvas, 0, 0, thumbWidth, targetHeight);
 
-          resolve(finalCanvas.toDataURL('image/png'));
+          resolve(finalCanvas.toDataURL("image/png"));
         };
         img.src = dataUrl;
       });
@@ -304,16 +354,25 @@ export function PromptPane() {
       let hasImage = false;
       for (let i = 0; i < clipboardData.items.length; i++) {
         const item = clipboardData.items[i];
-        if (item.type.startsWith('image/')) {
+        if (item.type.startsWith("image/")) {
           hasImage = true;
           const blob = item.getAsFile();
           if (!blob) break;
-          const originalName = blob.name && blob.name !== 'image.png' && blob.name !== 'blob' ? blob.name : undefined;
+          const originalName =
+            blob.name && blob.name !== "image.png" && blob.name !== "blob"
+              ? blob.name
+              : undefined;
           const reader = new FileReader();
           reader.onload = async () => {
             const dataUrl = reader.result as string;
             const thumbnailData = await generateThumbnail(dataUrl);
-            post({ type: 'createImageFile', imageData: dataUrl, imageType: item.type, thumbnailData, originalName } as any);
+            post({
+              type: "createImageFile",
+              imageData: dataUrl,
+              imageType: item.type,
+              thumbnailData,
+              originalName,
+            } as any);
           };
           reader.readAsDataURL(blob);
           break;
@@ -321,7 +380,7 @@ export function PromptPane() {
       }
 
       if (!hasImage) {
-        const text = clipboardData.getData('text/plain');
+        const text = clipboardData.getData("text/plain");
         if (text && textareaRef.current) {
           const ta = textareaRef.current;
           const start = ta.selectionStart;
@@ -333,7 +392,7 @@ export function PromptPane() {
       }
     }
 
-    textarea.addEventListener('paste', handlePaste);
+    textarea.addEventListener("paste", handlePaste);
 
     function handleDragOver(e: DragEvent) {
       e.preventDefault();
@@ -344,11 +403,13 @@ export function PromptPane() {
       e.preventDefault();
       e.stopPropagation();
 
-      const uriList = e.dataTransfer?.getData('text/uri-list');
+      const uriList = e.dataTransfer?.getData("text/uri-list");
       if (uriList) {
-        const uris = uriList.split('\r\n').filter(u => u && !u.startsWith('#'));
+        const uris = uriList
+          .split("\r\n")
+          .filter((u) => u && !u.startsWith("#"));
         if (uris.length > 0) {
-          post({ type: 'handleDroppedUris', uris } as any);
+          post({ type: "handleDroppedUris", uris } as any);
           return;
         }
       }
@@ -357,33 +418,46 @@ export function PromptPane() {
       if (!files) return;
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (file.type.startsWith('image/')) {
-          const originalName = file.name && file.name !== 'image.png' && file.name !== 'blob' ? file.name : undefined;
+        if (file.type.startsWith("image/")) {
+          const originalName =
+            file.name && file.name !== "image.png" && file.name !== "blob"
+              ? file.name
+              : undefined;
           const reader = new FileReader();
           reader.onload = async () => {
             const dataUrl = reader.result as string;
             const thumbnailData = await generateThumbnail(dataUrl);
-            post({ type: 'createImageFile', imageData: dataUrl, imageType: file.type, thumbnailData, originalName } as any);
+            post({
+              type: "createImageFile",
+              imageData: dataUrl,
+              imageType: file.type,
+              thumbnailData,
+              originalName,
+            } as any);
           };
           reader.readAsDataURL(file);
         } else {
           const reader = new FileReader();
           reader.onload = () => {
             const text = reader.result as string;
-            post({ type: 'handleDroppedFile', fileName: file.name, contents: text } as any);
+            post({
+              type: "handleDroppedFile",
+              fileName: file.name,
+              contents: text,
+            } as any);
           };
           reader.readAsText(file);
         }
       }
     }
 
-    document.addEventListener('dragover', handleDragOver);
-    document.addEventListener('drop', handleDrop);
+    document.addEventListener("dragover", handleDragOver);
+    document.addEventListener("drop", handleDrop);
 
     return () => {
-      textarea.removeEventListener('paste', handlePaste);
-      document.removeEventListener('dragover', handleDragOver);
-      document.removeEventListener('drop', handleDrop);
+      textarea.removeEventListener("paste", handlePaste);
+      document.removeEventListener("dragover", handleDragOver);
+      document.removeEventListener("drop", handleDrop);
     };
   }, []);
 
@@ -405,7 +479,13 @@ export function PromptPane() {
               {images.value.map((img, i) => (
                 <div class="image-preview-item" key={img.filePath}>
                   <img src={img.previewUri} alt="preview" />
-                  <button class="image-preview-remove" type="button" onClick={() => removeImage(i)}>×</button>
+                  <button
+                    class="image-preview-remove"
+                    type="button"
+                    onClick={() => removeImage(i)}
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
             </div>
@@ -418,12 +498,19 @@ export function PromptPane() {
                   filePath={f.filePath}
                   contents={f.contents}
                   language={f.language}
-                  onRemove={() => { droppedFiles.value = droppedFiles.value.filter((_, idx) => idx !== i); }}
+                  onRemove={() => {
+                    droppedFiles.value = droppedFiles.value.filter(
+                      (_, idx) => idx !== i,
+                    );
+                  }}
                 />
               ))}
             </div>
           )}
-          <div class="textarea-input-wrapper" style={terminalMode.value ? { position: 'relative' } : undefined}>
+          <div
+            class="textarea-input-wrapper"
+            style={terminalMode.value ? { position: "relative" } : undefined}
+          >
             {terminalMode.value && (
               <CommandAutocomplete
                 commands={commandList.value}
@@ -433,77 +520,166 @@ export function PromptPane() {
             )}
             <textarea
               ref={textareaRef}
-              class={`input-field${terminalMode.value ? ' terminal-mode' : ''}`}
-              placeholder={terminalMode.value ? 'Slash command — sent straight to Claude Code...' : 'Type your message to Claude Code...'}
+              class={`input-field${terminalMode.value ? " terminal-mode" : ""}`}
+              placeholder={
+                terminalMode.value
+                  ? "Slash command — sent straight to Claude Code..."
+                  : "Type your message to Claude Code..."
+              }
               rows={1}
               onKeyDown={handleKeyDown}
               onInput={handleInput}
-              style={terminalMode.value ? { borderColor: 'var(--terminal-border-color, #00ff41)', color: 'var(--terminal-font-color, #00ff41)' } : undefined}
+              style={
+                terminalMode.value
+                  ? {
+                      borderColor: "var(--terminal-border-color, #00ff41)",
+                      color: "var(--terminal-font-color, #00ff41)",
+                    }
+                  : undefined
+              }
             />
           </div>
           <div class="input-controls">
             <div class="left-controls">
-              <div class="connect-dropdown-wrapper">
-                <button class="input-dropdown-btn" type="button" onClick={toggleConnectMenu}>
-                  <span>Add</span>
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2.5l3 3 3-3"></path></svg>
-                </button>
-                {connectMenuOpen.value && (
-                  <div class="connect-menu">
-                    <div class="connect-menu-header">Add</div>
-                    <button class="connect-menu-item" type="button" onClick={() => { hideConnectMenu(); post({ type: 'showPluginsModal' } as any); }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-                      <span>Plugins</span>
-                    </button>
-                    <button class="connect-menu-item" type="button" onClick={() => { hideConnectMenu(); post({ type: 'showSkillsModal' } as any); }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                      <span>Skills</span>
-                    </button>
-                    <button class="connect-menu-item" type="button" onClick={() => { hideConnectMenu(); post({ type: 'showMCPModal' } as any); }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
-                      <span>MCP Servers</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button class={`input-toggle-btn${planMode.value ? ' active' : ''}`} type="button" onClick={togglePlan}>Plan</button>
+              <button
+                class="input-toggle-btn"
+                type="button"
+                onClick={injectPlanCommand}
+              >
+                plan
+              </button>
             </div>
             <div class="right-controls">
-              <button class="slash-btn" type="button" onClick={() => { if (terminalMode.value) { exitTerminalMode(); } else { const ta = textareaRef.current; if (ta) { ta.value = '/'; ta.focus(); } enterTerminalMode(); } }} title="Slash commands">/</button>
-              <button class="at-btn" type="button" onClick={() => post({ type: 'selectFile' } as any)} title="Attach file">@</button>
-              <button class="image-btn" type="button" onClick={selectImage} title="Attach images">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="16">
+              <button
+                class="at-btn"
+                type="button"
+                onClick={() => post({ type: "selectFile" } as any)}
+                title="Attach file"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
+              <button
+                class="image-btn"
+                type="button"
+                onClick={selectImage}
+                title="Attach images"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 16 16"
+                  width="14"
+                  height="16"
+                >
                   <g fill="currentColor">
                     <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0a1.5 1.5 0 0 1 3 0"></path>
                     <path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2zm13 1a.5.5 0 0 1 .5.5v6l-3.775-1.947a.5.5 0 0 0-.577.093l-3.71 3.71l-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12v.54L1 12.5v-9a.5.5 0 0 1 .5-.5z"></path>
                   </g>
                 </svg>
               </button>
-              <button class="breakout-btn" type="button" onClick={() => post({ type: 'launchSlashCommand', command: '', forceExternal: true } as any)} title="Open in external terminal">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                  <polyline points="15 3 21 3 21 9" />
-                  <line x1="10" y1="14" x2="21" y2="3" />
+              <button
+                class="slash-btn"
+                type="button"
+                onClick={() => {
+                  if (terminalMode.value) {
+                    exitTerminalMode();
+                  } else {
+                    const ta = textareaRef.current;
+                    if (ta) {
+                      ta.value = "/";
+                      ta.focus();
+                    }
+                    enterTerminalMode();
+                  }
+                }}
+                title="Slash commands"
+              >
+                /
+              </button>
+              <button
+                class="terminal-btn"
+                type="button"
+                onClick={() => post({ type: "launchColdTerminal" } as any)}
+                title="Open a terminal in the project directory"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <path d="M6 9l3 3-3 3" />
+                  <line x1="12" y1="15" x2="16" y2="15" />
+                </svg>
+              </button>
+              <button
+                class="breakout-btn"
+                type="button"
+                onClick={() =>
+                  post({
+                    type: "launchSlashCommand",
+                    command: "",
+                    forceExternal: true,
+                  } as any)
+                }
+                title="Break this session out into a terminal"
+              >
+                <svg
+                  width="16"
+                  height="14"
+                  viewBox="0 0 16 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1"
+                >
+                  <path d="M12.8 6.5v5q0 .5-.35.85-.3.35-.8.35H2.3q-.5 0-.8-.35a1.16 1.16 0 0 1-.35-.85v-7q0-.45.35-.8.3-.35.8-.35h7m-5.85 2.9L5.2 8 3.45 9.75m3.5 0H9.3M9.4 6.675l5.25-5.25M12.3 1.975l2.35-.55-.6 2.3" />
                 </svg>
               </button>
               {!isProcessing ? (
                 <button class="send-btn" type="button" onClick={sendMessage}>
-                  <div>
-                    <span>Send </span>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="11" height="11">
-                      <path fill="currentColor" d="M20 4v9a4 4 0 0 1-4 4H6.914l2.5 2.5L8 20.914L3.086 16L8 11.086L9.414 12.5l-2.5 2.5H16a2 2 0 0 0 2-2V4z"></path>
-                    </svg>
-                  </div>
+                  send
                 </button>
               ) : (
                 <div class="stop-skull-group">
-                  <button class="stop-inline-btn" type="button" onClick={stopRequest} title="Interrupt this turn, keep the session warm">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M6 6h12v12H6z"/>
+                  <button
+                    class="stop-inline-btn"
+                    type="button"
+                    onClick={stopRequest}
+                    title="Interrupt this turn, keep the session warm"
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                    >
+                      <path d="M6 6h12v12H6z" />
                     </svg>
-                    Stop
+                    stop
                   </button>
-                  <button class="skull-inline-btn" type="button" onClick={skullRequest} title="Hard-kill the process (and subagents) and park the session to History">
+                  <button
+                    class="skull-inline-btn"
+                    type="button"
+                    onClick={skullRequest}
+                    title="Hard-kill the process (and subagents) and park the session to History"
+                  >
                     💀
                   </button>
                 </div>

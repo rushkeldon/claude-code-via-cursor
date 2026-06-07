@@ -10,6 +10,20 @@
     opacity: 0.7;
   }
 
+  // No-language fence: no header bar. The body fills the whole rounded wrap
+  // (overflow:hidden already rounds its top corners), and the copy button floats
+  // over the top-right on hover instead of living in a strip.
+  &--nobar {
+    position: relative;
+
+    .code-block-copy-btn--float {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      z-index: 1;
+    }
+  }
+
   .code-block-bar {
     display: flex;
     align-items: center;

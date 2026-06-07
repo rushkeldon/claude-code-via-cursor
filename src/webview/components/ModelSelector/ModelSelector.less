@@ -58,7 +58,15 @@
   border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  // Size to the widest item (no fixed/narrow width forcing the long model names
+  // to wrap), but never spill past the panel. The webview is its own iframe, so
+  // 100vw == the panel width — the honest "don't overflow" cap (a literal 100%
+  // would resolve against the tiny absolutely-positioned row instead). The few
+  // px of slack keeps it off the very edge. Items stay single-line (nowrap) and
+  // ellipsize only in the unlikely event the cap is hit.
+  width: max-content;
   min-width: 160px;
+  max-width: calc(100vw - 16px);
   padding: 4px 0;
   z-index: 1000;
 
@@ -75,6 +83,8 @@
     cursor: pointer;
     text-align: left;
     transition: background 0.1s;
+    white-space: nowrap;
+    overflow: hidden;
 
     &:hover {
       background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.1));
@@ -99,12 +109,23 @@
 
     &-label {
       font-weight: 500;
+      // Don't let a long model name get clipped — it's the primary identifier,
+      // so it keeps its intrinsic width and drives the menu width instead.
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     &-desc {
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       flex: 1;
+      // The description is the flexible part: if the cap is ever hit, it (not
+      // the label) ellipsizes. min-width:0 lets a flex item shrink below its
+      // content size so text-overflow can engage.
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     &-check {

@@ -21,10 +21,23 @@
     box-shadow: 0 0 6px rgba(0, 210, 106, 0.5);
   }
 
-  &.processing &-indicator {
+  // Active turn, a heartbeat is flowing right now — the dot PULSES. This is the
+  // value-add over the old solid-yellow turn bracket: pulse present = output now.
+  &.working &-indicator {
     background-color: #ff9500;
     box-shadow: 0 0 6px rgba(255, 149, 0, 0.5);
     animation: session-status-pulse 1.5s ease-in-out infinite;
+  }
+
+  // Opening (pre-first-token) and quiet (turn open, no bytes right now) share the
+  // working color but the dot is STEADY — no pulse. Steady = "no output this
+  // instant," shown honestly. It is NOT an alarm and triggers no action; the
+  // exact pre-first-token window that mis-fired the old watchdog now reads benign.
+  &.opening &-indicator,
+  &.quiet &-indicator {
+    background-color: #ff9500;
+    box-shadow: 0 0 6px rgba(255, 149, 0, 0.35);
+    opacity: 0.7;
   }
 
   &.error &-indicator {

@@ -69,6 +69,10 @@ export function MessagesList() {
   // True while we're mid-programmatic-scroll, so the scroll event it fires
   // doesn't get mistaken for the user manually scrolling.
   const selfScrolling = useRef(false);
+  // Count of user messages last render. When the user sends a new prompt we
+  // ALWAYS scroll to the bottom so the just-sent card is visible — even if they
+  // had scrolled way up — and re-arm sticky-follow for the reply.
+  const prevUserCount = useRef(0);
 
   function scrollToBottom() {
     const el = containerRef.current;
@@ -109,6 +113,7 @@ export function MessagesList() {
   const _active = thinkingActive.value;
   const entryCount =
     messages.value.length + pendingQuestions.value.length + pendingPermissions.value.length;
+  const userCount = messages.value.filter((m) => m.role === 'user').length;
 
   // useLayoutEffect: scroll before paint so the user never sees the pre-scroll
   // frame. Runs after every render (no dep array) so streaming growth keeps the
@@ -116,6 +121,19 @@ export function MessagesList() {
   useLayoutEffect(() => {
     const hasNewEntry = entryCount > prevEntryCount.current;
     prevEntryCount.current = entryCount;
+
+    // A newly-sent user prompt ALWAYS wins: scroll to the bottom so the just-
+    // added card is visible regardless of where the user had scrolled, and
+    // re-arm sticky-follow so the incoming reply keeps tracking. This runs
+    // before the stickToBottom early-return below so it can't be suppressed.
+    const sentNewPrompt = userCount > prevUserCount.current;
+    prevUserCount.current = userCount;
+    if (sentNewPrompt) {
+      stickToBottom.current = true;
+      scrollToBottom();
+      return;
+    }
+
     if (!stickToBottom.current) return;
 
     if (hasNewEntry) {

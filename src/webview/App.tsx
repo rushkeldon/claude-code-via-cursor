@@ -6,13 +6,9 @@ import { Header } from './components/Header/Header';
 import { ConversationHistory } from './components/ConversationHistory/ConversationHistory';
 import { MessagesList } from './components/MessagesList/MessagesList';
 import { AuthErrorCard } from './components/AuthErrorCard/AuthErrorCard';
-import { StallHint } from './components/StallHint/StallHint';
 import { PromptPane } from './components/PromptPane/PromptPane';
 import { SessionStatus } from './components/SessionStatus/SessionStatus';
 import { SettingsModal } from './components/SettingsModal/SettingsModal';
-import { SkillsMarketplace } from './components/SkillsMarketplace/SkillsMarketplace';
-import { PluginsMarketplace } from './components/PluginsMarketplace/PluginsMarketplace';
-import { MCPServersList } from './components/MCPServersList/MCPServersList';
 import { SlashCommandsModal } from './components/SlashCommands/SlashCommands';
 import { FirstRun } from './components/FirstRun/FirstRun';
 
@@ -66,13 +62,9 @@ export function App() {
       <ConversationHistory />
       <MessagesList />
       <AuthErrorCard />
-      <StallHint />
       <PromptPane />
       <SessionStatus />
       <SettingsModal />
-      <SkillsMarketplace />
-      <PluginsMarketplace />
-      <MCPServersList />
       <SlashCommandsModal />
       <FirstRun />
     </main>
