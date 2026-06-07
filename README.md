@@ -1,24 +1,24 @@
 # Claude Code via Cursor
 
-A Cursor / VS Code extension that wraps the **Claude Code CLI** in a rich, editor-native chat interface — think Claude Desktop, but driving your *own* local `claude`, living inside your editor, with nothing fenced off.
+A Cursor / VS Code extension that wraps the **Claude Code CLI** in a rich, editor-native chat interface — think Claude Desktop, but driving your _own_ local `claude`, living inside your editor, with nothing fenced off.
 
-Every prompt routes through your locally-authenticated Claude Code session, so usage bills against your Claude subscription's interactive bucket — not Cursor's API tokens.
+Every prompt routes through your locally-authenticated Claude Code session, so it draws from your Claude subscription's shared usage allowance, not Cursor's metered model billing - or (see NOTE) Anthropic's API credits.
 
----
+NOTE : If ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN) is set anywhere in the environment the CLI launches in, such as your shell config or a settings.json env block, that key takes precedence over your subscription and routes every request to pay-per-token API billing instead. Run /status inside Claude Code to confirm which auth is active; unset ANTHROPIC_API_KEY and restart to fall back to your subscription.
 
 ## Why this exists
 
-The terminal is a fantastic place to run Claude Code and a mediocre place to *live* in it all day. First-party agent UIs are the inverse: pleasant to live in, but they hand you only the curated slice of capability the vendor chose to expose. This extension refuses that trade-off.
+The terminal is a fantastic place to run Claude Code and a mediocre place to _live_ in it all day. First-party agent UIs are the inverse: pleasant to live in, but they hand you only the curated slice of capability the vendor chose to expose. This extension refuses that trade-off.
 
 **The premise: a Claude Code power user should be able to defect to this and lose nothing.** Anything `claude` can do headlessly, you can do here — wrapped in a UI that's genuinely nicer than a TTY, without ever dropping to a second-class subset.
 
 Three things make that real:
 
-1. **No sealed subset — the CLI's full reach, inline.** Slash commands and skills pass straight through to your live session over Claude Code's own `stream-json` channel. `/compact`, `/context`, `/usage`, a custom `/deploy`, a skill like `/code-review` — they execute *in place*, output and tool calls rendering right in the chat. Skills you install mid-session show up automatically, because the command list is sourced from Claude Code itself rather than hard-coded. If the CLI grows a capability, it's here the same day.
+1. **No sealed subset — the CLI's full reach, inline.** Slash commands and skills pass straight through to your live session over Claude Code's own `stream-json` channel. `/compact`, `/context`, `/usage`, a custom `/deploy`, a skill like `/code-review` — they execute _in place_, output and tool calls rendering right in the chat. Skills you install mid-session show up automatically, because the command list is sourced from Claude Code itself rather than hard-coded. If the CLI grows a capability, it's here the same day.
 
-2. **Change model, effort, and thoughts without upending the session.** Switch Opus → Sonnet, dial effort from `high` to `max`, toggle whether you see Claude's reasoning — all from the prompt bar, all while your conversation continues unbroken. Continuity *is* the product: you should never lose your place to change a setting.
+2. **Change model, effort, and thoughts without upending the session.** Switch Opus → Sonnet, dial effort from `high` to `max`, toggle whether you see Claude's reasoning — all from the prompt bar, all while your conversation continues unbroken. Continuity _is_ the product: you should never lose your place to change a setting.
 
-3. **A first-class Cursor `plan.md` loop.** Paired with two companion skills (`modes` + `plan2cursor`), the extension sits on a seam nothing else does — Claude Code's agency *plus* Cursor's native plans panel ticking off todos live as the agent works. Plan → review → approve → execute, with real checkboxes completing in real time while the work lands.
+3. **A first-class Cursor `plan.md` loop.** Paired with two companion skills (`modes` + `plan2cursor`), the extension sits on a seam nothing else does — Claude Code's agency _plus_ Cursor's native plans panel ticking off todos live as the agent works. Plan → review → approve → execute, with real checkboxes completing in real time while the work lands.
 
 The design rule throughout: **translate the capability, don't reproduce the keystroke.** The CLI's `@`-mention is a TTY affordance for "pull a file into context" — so here it's a paperclip button, drag-drop, and plain path-typing, not a fake `@` glyph. Wrap and present; never fork behavior or reinvent what the CLI already does well.
 
@@ -63,7 +63,7 @@ Change any of them whenever you like — your session and history are preserved 
 
 ### Plan mode & the Cursor `plan.md` workflow
 
-The **Plan** button in the prompt bar activates plan mode through the `modes` skill — it drops the `modes` plan directive into your prompt, constraining Claude to *planning* (producing a Cursor-compatible `*.plan.md` spec) rather than editing code.
+The **Plan** button in the prompt bar activates plan mode through the `modes` skill — it drops the `modes` plan directive into your prompt, constraining Claude to _planning_ (producing a Cursor-compatible `*.plan.md` spec) rather than editing code.
 
 Paired with the two recommended skills, this becomes a complete loop:
 
@@ -83,7 +83,7 @@ Every session is saved. The **History** panel lets you browse, resume, fork, and
 ### Smart turn handling
 
 - **Queue while busy.** Send follow-up messages while Claude is mid-turn; they queue and flush automatically when the turn ends.
-- **Stop vs. hard-kill.** *Stop* interrupts the current turn but keeps the process warm; the 💀 *skull* hard-kills the process and its subagents and parks the session to history.
+- **Stop vs. hard-kill.** _Stop_ interrupts the current turn but keeps the process warm; the 💀 _skull_ hard-kills the process and its subagents and parks the session to history.
 - **Dropped-turn recovery.** If a turn goes silent without finishing, the extension nudges it back to life automatically, with a hard-kill backstop if it's truly wedged.
 
 ### Rich chat surface
@@ -140,4 +140,4 @@ The process is kept warm across turns wherever possible — model switches happe
 
 ---
 
-*Personal project — not distributed. Built and installed locally as a `.vsix`.*
+_Personal project — not distributed. Built and installed locally as a `.vsix`._
