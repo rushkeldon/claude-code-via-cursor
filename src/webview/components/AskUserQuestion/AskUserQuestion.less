@@ -196,12 +196,13 @@
 }
 
 .ask-question-submit {
-  // User-green (Matrix green) gradient with dark text for legibility — matches
-  // the QUEUED badge precedent.
-  background: linear-gradient(180deg, #00ff41 0%, #008f11 100%);
-  color: #001b00;
+  // Flat green, white text — same material language as the Send and Stop buttons
+  // (Tailwind green-500 #22c55e base / green-600 #16a34a hover, flat fill, no
+  // gradient) so all the action buttons read as one family.
+  background-color: #22c55e;
+  color: #fff;
 
-  &:hover { filter: brightness(1.08); }
+  &:hover { background-color: #16a34a; }
 }
 
 .ask-question-cancel {

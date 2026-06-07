@@ -276,15 +276,15 @@
 
 .send-btn {
   .action-button();
-  // User-green (Matrix green) gradient with dark text — matches the
-  // AskUserQuestion submit button so the two send affordances read as one family
-  // (and contrast with the red Stop button).
-  background: linear-gradient(180deg, #00ff41 0%, #008f11 100%);
-  color: #001b00;
-  transition: all 0.2s ease;
+  // Flat green, white text — same material language as the red Stop button
+  // (Tailwind 500 base / 600 hover, flat fill, no gradient) so Send and Stop read
+  // as one button family. Green-500 #22c55e → green-600 #16a34a on hover.
+  background-color: #22c55e;
+  color: #fff;
+  transition: background-color 0.15s ease;
 
   &:hover {
-    filter: brightness(1.08);
+    background-color: #16a34a;
   }
 
   &:disabled {
