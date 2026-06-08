@@ -88,7 +88,7 @@ on('ready', () => {
   authFailed.value = false;
 });
 
-on('authError' as any, () => {
+on('apiError' as any, () => {
   authFailed.value = true;
 });
 

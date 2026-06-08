@@ -140,4 +140,33 @@ The process is kept warm across turns wherever possible — model switches happe
 
 ---
 
+## Authentication and compliance
+
+CCVC is a launcher. It runs your own locally installed Claude Code (`claude`)
+inside Cursor and gives it a chat surface. It does not replace, proxy, or
+intermediate Claude Code in any way.
+
+Specifically, CCVC **does not**:
+
+- handle, store, capture, log, or transmit your Anthropic credentials
+- present or embed any login or authentication flow
+- route Claude requests through the extension on your behalf
+- automate Claude in headless or background modes
+
+**You** are responsible for authentication. CCVC assumes you already have an
+Anthropic account, have `claude` installed, and have authenticated it yourself
+(via your own Claude subscription login or your own API key), entirely outside
+this extension. When a session needs re-authentication, CCVC will tell you, and
+you re-authenticate through your own `claude` setup. The "respawn" control only
+restarts the local process; it never logs you in.
+
+This keeps CCVC within ordinary, individual use of Claude Code as described in
+Anthropic's terms: https://code.claude.com/docs/en/legal-and-compliance
+
+CCVC is an independent project. It is not affiliated with, sponsored by, or
+endorsed by Anthropic or Anysphere (Cursor). "Claude," "Claude Code," and
+"Cursor" are used only to describe interoperability with those products.
+
+---
+
 _Personal project — not distributed. Built and installed locally as a `.vsix`._

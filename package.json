@@ -2,7 +2,7 @@
   "name": "claude-code-via-cursor",
   "displayName": "Claude Code via Cursor",
   "description": "Personal fork of Claude Code Chat with the OpenCredits integration removed. Routes only to your local Claude Code.",
-  "version": "3.0.0-appcloud9.149",
+  "version": "3.0.0-appcloud9.154",
   "publisher": "appcloud9",
   "author": "Keldon Rush (appcloud9.com)",
   "repository": {
@@ -153,85 +153,107 @@
     "configuration": {
       "title": "Claude Code via Cursor",
       "properties": {
-        "claudeCodeChat.wsl.enabled": {
+        "ccvc.wsl.enabled": {
           "type": "boolean",
           "default": false,
           "description": "Enable WSL integration for running Claude"
         },
-        "claudeCodeChat.wsl.distro": {
+        "ccvc.wsl.distro": {
           "type": "string",
           "default": "Ubuntu",
           "description": "WSL distribution name (e.g., Ubuntu, Debian)"
         },
-        "claudeCodeChat.wsl.nodePath": {
+        "ccvc.wsl.nodePath": {
           "type": "string",
           "default": "",
           "description": "Optional path to Node.js in the WSL distribution. Only needed if Claude was installed via npm. Recent Claude installs ship as a native executable and don't require Node."
         },
-        "claudeCodeChat.wsl.claudePath": {
+        "ccvc.wsl.claudePath": {
           "type": "string",
           "default": "/usr/local/bin/claude",
           "description": "Path to Claude executable in the WSL distribution"
         },
-        "claudeCodeChat.thinking.show": {
+        "ccvc.thinking.show": {
           "type": "boolean",
           "default": true,
           "description": "Default for whether Claude's summarized thoughts are shown (the Thoughts toggle in the prompt pane). Per-session changes from the toggle take precedence."
         },
-        "claudeCodeChat.thinking.effort": {
+        "ccvc.thinking.effort": {
           "type": "string",
           "default": "",
           "description": "Default thinking effort/depth (e.g. low, medium, high, xhigh, max). Empty inherits the model's default. Per-session changes from the Effort picker take precedence; available levels are per-model."
         },
-        "claudeCodeChat.permissions.yoloMode": {
+        "ccvc.permissions.yoloMode": {
           "type": "boolean",
           "default": false,
           "description": "Enable Yolo Mode to skip all permission checks. Use with caution as Claude can execute any command without asking."
         },
-        "claudeCodeChat.executable.path": {
+        "ccvc.executable.path": {
           "type": "string",
           "default": "",
           "description": "Custom path to the Claude Code executable. Leave empty to use the default 'claude' command."
         },
-        "claudeCodeChat.environment.variables": {
+        "ccvc.environment.variables": {
           "type": "object",
           "default": {},
           "description": "Custom environment variables to pass to Claude Code. Example: {\"ANTHROPIC_API_KEY\": \"sk-...\"}"
         },
-        "claudeCodeChat.environment.disabled": {
+        "ccvc.environment.disabled": {
           "type": "boolean",
           "default": false,
           "description": "When enabled, custom environment variables are not passed to Claude Code."
         },
-        "claudeCodeChat.terminal.useIntegrated": {
+        "ccvc.terminal.useIntegrated": {
           "type": "boolean",
           "default": true,
           "description": "Use Cursor's integrated terminal for slash commands. Uncheck to use an external terminal."
         },
-        "claudeCodeChat.terminal.externalApp": {
+        "ccvc.terminal.externalApp": {
           "type": "string",
           "default": "",
           "description": "External terminal application name (e.g., iTerm2, Windows Terminal, kitty)."
         },
-        "claudeCodeChat.terminal.customTemplate": {
+        "ccvc.terminal.customTemplate": {
           "type": "string",
           "default": "",
           "description": "Custom terminal launch template. Use {{command}} as placeholder for the command to run."
         },
-        "claudeCodeChat.terminal.borderColor": {
+        "ccvc.terminal.borderColor": {
           "type": "string",
           "default": "#00ff41",
           "description": "Border color for the prompt in terminal mode."
         },
-        "claudeCodeChat.terminal.fontColor": {
+        "ccvc.terminal.fontColor": {
           "type": "string",
           "default": "#00ff41",
           "description": "Font color for the prompt in terminal mode."
         },
-        "claudeCodeChat.firstRun.hasShown": {
+        "ccvc.modes.items": {
+          "type": "array",
+          "default": [
+            { "id": "agent", "label": "Agent", "command": "/modes agent" },
+            { "id": "plan", "label": "Plan", "command": "/modes plan ./doc" }
+          ],
+          "description": "Items shown in the prompt mode picker. Each item sends its `command` as an explicit message when clicked. Built-in ids 'agent' and 'plan' get matching icons; other ids get a generic icon.",
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "command"],
+            "properties": {
+              "id": { "type": "string", "description": "Stable id; 'agent'/'plan' drive the status pill and get built-in icons." },
+              "label": { "type": "string", "description": "Text shown in the menu and (for the active mode) on the pill." },
+              "command": { "type": "string", "description": "The message sent when this item is clicked, e.g. '/modes plan ./doc'." }
+            }
+          }
+        },
+        "ccvc.firstRun.hasShown": {
           "type": "boolean",
           "default": false,
           "description": "Whether the first-run experience has been shown. Uncheck to see it again on next launch."
+        },
+        "ccvc.migratedFromClaudeCodeChat": {
+          "type": "boolean",
+          "default": false,
+          "description": "Internal: set once the one-time migration of legacy claudeCodeChat.* settings to ccvc.* has run. Not meant to be edited manually."
         }
       }
     }

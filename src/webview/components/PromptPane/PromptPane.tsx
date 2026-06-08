@@ -1,9 +1,11 @@
 import "./PromptPane.less";
 import { signal } from "@preact/signals";
+import { VNode } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { post, on } from "../../vscode";
-import { processing } from "../../state/session";
+import { processing, respawnAvailable } from "../../state/session";
 import { commandList } from "../../state/commands";
+import { modeItems, activeMode, type ModeItem } from "../../state/settings";
 import { ModelSelector } from "../ModelSelector/ModelSelector";
 import { EffortPicker } from "../EffortPicker/EffortPicker";
 import { ThoughtsToggle } from "../ThoughtsToggle/ThoughtsToggle";
@@ -21,6 +23,36 @@ export interface DroppedFileData {
 
 const planMode = signal(false);
 const terminalMode = signal(false);
+
+// The mode picker mirrors Cursor's: a pill showing the *real* active mode (read
+// by the host from the modes skill's active_modes.md → activeMode signal) that
+// opens a menu of configured items (modeItems signal, from ccvc.modes.items).
+// Clicking an item SENDS its command explicitly (a visible turn); the pill does
+// NOT change optimistically — it updates only when the host reports the file
+// actually changed. Icons stay code-side, keyed by id, with a generic fallback
+// for user-added ids. Glyphicons (licensed), inlined as currentColor SVG so they
+// theme via --vscode-*.
+const MODE_ICONS: Record<string, VNode> = {
+  agent: (
+    <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
+      <path d="M7.3 18.015q0-.087.022-.174l1.618-6.384H4.56a.73.73 0 0 1-.582-1.166l6.543-8.744a.74.74 0 0 1 .583-.29h.182a.73.73 0 0 1 .73.728q-.002.074-.016.16l-1.282 5.669h4.722a.73.73 0 0 1 .728.729.7.7 0 0 1-.153.444L8.773 18.46a.74.74 0 0 1-.576.284h-.168a.73.73 0 0 1-.729-.729Z" />
+    </svg>
+  ),
+  plan: (
+    <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
+      <path d="M.657 15.249V4.751a3.16 3.16 0 0 1 3.15-3.15h10.497c.315 0 .609.064.892.148L12.845 3.7H3.806c-.577 0-1.05.472-1.05 1.05v10.498c0 .578.473 1.05 1.05 1.05h10.498c.578 0 1.05-.472 1.05-1.05v-3.821l2.1-2.184v6.005a3.16 3.16 0 0 1-3.15 3.15H3.806a3.16 3.16 0 0 1-3.15-3.15Zm9.112-1.522c-.284 0-.556-.116-.766-.336L5.16 9.286a.6.6 0 0 1-.136-.368c0-.115.042-.23.116-.325l.818-1.018a.53.53 0 0 1 .41-.2c.094 0 .2.032.283.095l2.75 1.826 8.032-6.687a.54.54 0 0 1 .336-.126.53.53 0 0 1 .377.158l1.04 1.05a.5.5 0 0 1 .157.367.56.56 0 0 1-.147.367l-8.671 8.976c-.21.22-.483.326-.756.326" />
+    </svg>
+  ),
+};
+// Generic fallback icon for user-added mode ids without a built-in glyph.
+const MODE_ICON_FALLBACK: VNode = (
+  <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
+    <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.6" />
+  </svg>
+);
+function iconForMode(id: string): VNode {
+  return MODE_ICONS[id] ?? MODE_ICON_FALLBACK;
+}
 const terminalInput = signal("");
 const images = signal<Array<{ filePath: string; previewUri: string }>>([]);
 const droppedFiles = signal<DroppedFileData[]>([]);
@@ -77,6 +109,24 @@ on("fileDropped" as any, (msg: any) => {
 export function PromptPane() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isProcessing = processing.value;
+  const canRespawn = respawnAvailable.value;
+
+  // Mode picker open/close, mirroring ModelSelector's outside-click handling.
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const modeRootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!modeMenuOpen) return;
+    const close = (e: Event) => {
+      if (modeRootRef.current && !modeRootRef.current.contains(e.target as Node))
+        setModeMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("focusin", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("focusin", close);
+    };
+  }, [modeMenuOpen]);
 
   // Apply a demoted queued prompt to the (ref-based) textarea + flags. Reads the
   // signal so it re-runs whenever an item is pulled back via the card's ⬇.
@@ -170,6 +220,14 @@ export function PromptPane() {
     post({ type: "skull" } as any);
   }
 
+  function respawnRequest() {
+    // Recover from a provider API error: respawn fresh (re-reads auth) and
+    // re-send the failed turn. Clears the local flag immediately for snappy UI;
+    // setProcessing(true) from the resent turn keeps it cleared.
+    respawnAvailable.value = false;
+    post({ type: "respawn" } as any);
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
     if (terminalMode.value) {
       if (e.key === "Escape") {
@@ -258,28 +316,21 @@ export function PromptPane() {
     el.style.height = el.scrollHeight + "px";
   }
 
-  // The Plan button is a prompt-injector, not a toggle: it drops the modes-skill
-  // command into the input (focused, cursor at end) and does NOT send. The user
-  // can edit the target dir, then send it themselves. This drives the `modes`
-  // skill (which produces a Cursor-compatible *.plan.md) rather than CC's native
-  // --permission-mode plan, and teaches the underlying command by revealing it.
-  function injectPlanCommand() {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const cmd = "/modes plan ./doc";
-    textarea.value = cmd;
-    autoResize(textarea);
-    // Enter green pass-through mode just as typing "/" does — the button injects
-    // a command, so the input should LOOK like a command (green border, command
-    // placeholder, autocomplete, Enter = raw pass-through). Setting textarea.value
-    // fires no input event, so handleInput never runs; flip the signals ourselves
-    // and fetch the command list (parity with enterTerminalMode).
-    terminalMode.value = true;
-    terminalInput.value = cmd;
-    post({ type: "fetchCommandList" } as any);
-    textarea.focus();
-    const end = textarea.value.length;
-    textarea.setSelectionRange(end, end);
+  // Selecting a mode SENDS its configured command explicitly — a real, visible
+  // turn over the normal sendMessage path. The pill is NOT updated here: it
+  // reflects the real active mode reported by the host (activeMode signal) once
+  // the modes skill actually writes active_modes.md. This removes the old
+  // click-then-backspace desync entirely. Sending while a turn is in flight is
+  // handled by the normal queueing in the send path.
+  function selectMode(item: ModeItem) {
+    setModeMenuOpen(false);
+    const cmd = item.command?.trim();
+    if (!cmd) return;
+    post({
+      type: "sendMessage",
+      text: cmd,
+      planMode: planMode.value,
+    });
   }
 
   function selectImage() {
@@ -541,13 +592,63 @@ export function PromptPane() {
           </div>
           <div class="input-controls">
             <div class="left-controls">
-              <button
-                class="input-toggle-btn"
-                type="button"
-                onClick={injectPlanCommand}
-              >
-                plan
-              </button>
+              <div class="mode-dropdown-wrapper" ref={modeRootRef}>
+                {(() => {
+                  const items = modeItems.value;
+                  const active = activeMode.value; // 'agent' | 'plan' (the real mode)
+                  // Pill shows the configured item for the active mode (honoring a
+                  // custom label), falling back to a capitalized id if not listed.
+                  const current = items.find((m) => m.id === active);
+                  const pillLabel =
+                    current?.label ?? active.charAt(0).toUpperCase() + active.slice(1);
+                  return (
+                    <button
+                      class="mode-dropdown-btn"
+                      type="button"
+                      onClick={() => setModeMenuOpen(!modeMenuOpen)}
+                      title="Mode"
+                    >
+                      <span class="mode-dropdown-icon">{iconForMode(active)}</span>
+                      <span class="mode-dropdown-text">{pillLabel}</span>
+                      <svg
+                        width="8"
+                        height="8"
+                        viewBox="0 0 8 8"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M1 2.5l3 3 3-3" />
+                      </svg>
+                    </button>
+                  );
+                })()}
+                {modeMenuOpen && (
+                  <div class="mode-menu" role="listbox">
+                    {modeItems.value.map((m) => {
+                      const isSel = m.id === activeMode.value;
+                      return (
+                        <button
+                          key={m.id}
+                          class={`mode-menu-item${isSel ? " selected" : ""}`}
+                          type="button"
+                          role="option"
+                          aria-selected={isSel}
+                          onClick={() => selectMode(m)}
+                        >
+                          <span class="mode-menu-item-icon">{iconForMode(m.id)}</span>
+                          <span class="mode-menu-item-label">{m.label}</span>
+                          {isSel && (
+                            <span class="mode-menu-item-check">✓</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
             <div class="right-controls">
               <button
@@ -652,7 +753,16 @@ export function PromptPane() {
                   <path d="M12.8 6.5v5q0 .5-.35.85-.3.35-.8.35H2.3q-.5 0-.8-.35a1.16 1.16 0 0 1-.35-.85v-7q0-.45.35-.8.3-.35.8-.35h7m-5.85 2.9L5.2 8 3.45 9.75m3.5 0H9.3M9.4 6.675l5.25-5.25M12.3 1.975l2.35-.55-.6 2.3" />
                 </svg>
               </button>
-              {!isProcessing ? (
+              {canRespawn ? (
+                <button
+                  class="respawn-btn"
+                  type="button"
+                  onClick={respawnRequest}
+                  title="Respawn the process (re-reads auth) and re-send the failed turn"
+                >
+                  respawn
+                </button>
+              ) : !isProcessing ? (
                 <button class="send-btn" type="button" onClick={sendMessage}>
                   send
                 </button>

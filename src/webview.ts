@@ -186,7 +186,7 @@ export async function newSession(): Promise<void> {
     data: { isProcessing: false },
   });
 
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
   if (config.get<boolean>("permissions.yoloMode", false)) {
     conversation.sendAndSaveMessage({
       type: "notice",
@@ -273,7 +273,7 @@ function initializeWebview(): void {
 function checkFirstRun(): void {
   if (!deps) return;
   const globalState = deps.getGlobalState();
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
 
   const settingShown = config.get<boolean>("firstRun.hasShown", false);
   if (settingShown && globalState.get("hasShownFirstRun")) return;
@@ -363,7 +363,7 @@ function detectTerminals(): void {
 function markFirstRunShown(): void {
   if (!deps) return;
   deps.getGlobalState().update("hasShownFirstRun", true);
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
   config.update("firstRun.hasShown", true, vscode.ConfigurationTarget.Global);
 }
 
@@ -466,6 +466,11 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "launchColdTerminal":
       launchColdTerminal();
       return;
+    case "openTerminal":
+      // API-error card's neutral "Open Terminal" — a plain workspace terminal so
+      // the user can refresh whatever auth applies (aws sso login / claude login).
+      launchColdTerminal();
+      return;
     case "installRecommendedSkills":
       installRecommendedSkills();
       return;
@@ -490,7 +495,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "resetFirstRun": {
       const globalState = deps.getGlobalState();
       globalState.update("hasShownFirstRun", false);
-      const config = vscode.workspace.getConfiguration("claudeCodeChat");
+      const config = vscode.workspace.getConfiguration("ccvc");
       config.update("firstRun.hasShown", false, vscode.ConfigurationTarget.Global);
       vscode.window.showInformationMessage("First-run experience will show on next launch.");
       return;
@@ -509,6 +514,11 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "skull":
       // Hard kill: terminate the process group and park to history.
       await subprocess.skullProcess();
+      return;
+    case "respawn":
+      // Recovery after a provider API error: respawn fresh (re-reads auth) and
+      // re-send the turn that failed.
+      await subprocess.respawnAndResend();
       return;
     case "sendNow":
       // Explicit interrupt + flush the head queued item now (the card's ⬆).
@@ -542,7 +552,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
       settings.sendCurrentSettings();
       return;
     case "getEnvVars": {
-      const evConfig = vscode.workspace.getConfiguration("claudeCodeChat");
+      const evConfig = vscode.workspace.getConfiguration("ccvc");
       const evVars = evConfig.get<Record<string, string>>(
         "environment.variables",
         {},
@@ -626,7 +636,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
       return;
     case "saveCustomProvider":
       if (message.envVars) {
-        const cpConfig = vscode.workspace.getConfiguration("claudeCodeChat");
+        const cpConfig = vscode.workspace.getConfiguration("ccvc");
         const cpEnvVars = cpConfig.get<Record<string, string>>(
           "environment.variables",
           {},
@@ -874,7 +884,7 @@ function sendPlatformInfo(): void {
   const dismissed = deps
     .getGlobalState()
     .get<boolean>("wslAlertDismissed", false);
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
   const wslEnabled = config.get<boolean>("wsl.enabled", false);
 
   postMessage({
@@ -1181,7 +1191,7 @@ type TerminalLaunchOpts = {
 // otherwise normalize the externalApp string into the enum (Terminal.app is the
 // default external target when nothing more specific matches).
 function getTerminalType(): TerminalType {
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
   if (config.get<boolean>("terminal.useIntegrated", true)) return "integrated";
   const app = (config.get<string>("terminal.externalApp", "") || "").toLowerCase();
   if (app.includes("iterm")) return "iterm";
@@ -1255,7 +1265,7 @@ function openTerminal(opts: TerminalLaunchOpts): void {
   // A custom launch template is a user override of all per-app logic — honor it
   // before the switch so we don't regress that feature. Cold uses a login shell;
   // fork uses the assembled claude command.
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
   const customTemplate = config.get<string>("terminal.customTemplate", "");
   if (type !== "integrated" && customTemplate) {
     const cmd =
@@ -1480,7 +1490,7 @@ function forkSessionToTerminal(sessionId: string | undefined): void {
     vscode.window.showWarningMessage("No session to fork.");
     return;
   }
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
   const yolo = config.get<boolean>("permissions.yoloMode", false);
   const model = settings.getLocalModel() || settings.getFullModelString().configured;
 
@@ -1526,7 +1536,7 @@ async function launchSlashCommand(
       ? command
       : `/${command}`
     : "";
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
 
   // Carry the extension's current YOLO mode into the breakaway terminal session
   // so the forked session picks up the same permission posture as the in-process
@@ -1553,7 +1563,7 @@ async function launchSlashCommand(
 // `ca` to re-authenticate). Honors the same terminal-type dispatch as the breakout.
 function launchColdTerminal(): void {
   log.debug("Webview", "launchColdTerminal", undefined, "➡️");
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
   const yolo = config.get<boolean>("permissions.yoloMode", false);
   openTerminal({
     mode: "cold",
@@ -1565,7 +1575,7 @@ function launchColdTerminal(): void {
 
 function installRecommendedSkills(): void {
   log.debug("Webview", "installRecommendedSkills", undefined, "➡️");
-  const config = vscode.workspace.getConfiguration("claudeCodeChat");
+  const config = vscode.workspace.getConfiguration("ccvc");
   const claudePath =
     (config.get<string>("executable.path", "") || "").trim() || "claude";
 

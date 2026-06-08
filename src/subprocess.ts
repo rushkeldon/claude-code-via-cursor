@@ -9,6 +9,7 @@ import * as permissions from './permissions';
 import * as backupRepo from './backupRepo';
 import * as settings from './settings';
 import * as terminalCommands from './terminalCommands';
+import * as modes from './modes';
 import * as sessionLock from './sessionLock';
 import * as turnHealth from './turnHealth';
 import { TITLE_PROMPT, sanitizeTitle } from './sessionTitle';
@@ -88,7 +89,15 @@ let errorOutput = '';
 // fresh process restarts its cumulative at ~0. Without the delta, adding the raw
 // cumulative every turn compounds the cost quadratically (the $418-vs-$80 bug).
 let lastProcessCumulativeCost = 0;
-let authErrorFired = false;
+// Latches once a provider API error is detected on the live process, so the
+// close handler parks the session instead of chain-spawning, and so we fire the
+// apiError card only once per process. Cleared by respawnAndResend().
+let apiErrorFired = false;
+// The turn currently being executed (set in runTurn). Captured into
+// lastFailedTurn when an API error fires, so Respawn can re-send exactly the
+// turn that failed.
+let currentTurn: Turn | undefined;
+let lastFailedTurn: Turn | undefined;
 
 // ── Outbound control protocol ─────────────────────────────────────────────
 // We send control_requests (initialize, set_model, interrupt, …) to the live
@@ -123,6 +132,40 @@ const AUTH_PATTERNS: RegExp[] = [
 	/oauth.*(expired|invalid|failed|revoked)/i,
 	/\b401\b/,
 ];
+
+// ── Provider API-error classification ──────────────────────────────────────
+// A provider failure (Bedrock, direct-Anthropic, …) surfaces as an "API Error:
+// <code>" string. We categorize by HTTP status to pick the right card copy and
+// whether to offer Respawn recovery. Provider-agnostic by construction — we
+// never inspect credentials, only the error shape.
+export type ApiErrorCategory = 'auth' | 'rate-limit' | 'bad-request' | 'server' | 'client';
+
+interface ApiErrorClassification {
+	isError: boolean;
+	code?: number;
+	category?: ApiErrorCategory;
+}
+
+// The keyword "error" must be ADJACENT to a 4xx/5xx code so the assistant
+// *discussing* an error ("a 403 means…", "we retry on 500s") is never flagged —
+// only the CLI's literal "API Error: 403 …" shape matches. See plan §2.
+const API_ERROR_RE = /error[:\s\-]*\b(4\d\d|5\d\d)\b/i;
+
+function categoryForCode(code: number): ApiErrorCategory {
+	if (code === 401 || code === 403) { return 'auth'; }
+	if (code === 429) { return 'rate-limit'; }
+	if (code === 400) { return 'bad-request'; }
+	if (code >= 500) { return 'server'; }
+	return 'client';
+}
+
+export function classifyApiError(text: string): ApiErrorClassification {
+	if (!text) { return { isError: false }; }
+	const m = API_ERROR_RE.exec(text);
+	if (!m) { return { isError: false }; }
+	const code = parseInt(m[1], 10);
+	return { isError: true, code, category: categoryForCode(code) };
+}
 
 export function init(d: SubprocessDeps): void {
 	log.info('Subprocess', 'init', { hasPostMessage: !!d.postMessage }, '🔧');
@@ -220,7 +263,7 @@ export function getProcess(): cp.ChildProcess | undefined {
 
 export function convertToWSLPath(windowsPath: string): string {
 	log.debug('Subprocess', 'enter convertToWSLPath', { windowsPath }, '➡️');
-	const config = vscode.workspace.getConfiguration('claudeCodeChat');
+	const config = vscode.workspace.getConfiguration('ccvc');
 	const wslEnabled = config.get<boolean>('wsl.enabled', false);
 
 	if (wslEnabled && windowsPath.match(/^[a-zA-Z]:/)) {
@@ -334,6 +377,8 @@ interface Turn {
 
 async function runTurn(turn: Turn): Promise<void> {
 	if (!deps) { return; }
+	// Remember this turn so an API error mid-flight can capture it for Respawn.
+	currentTurn = turn;
 	const { message, planMode, images } = turn;
 
 	// Thinking depth/visibility is controlled by the Effort/Thoughts pickers via
@@ -440,7 +485,7 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		'--verbose'
 	];
 
-	const config = vscode.workspace.getConfiguration('claudeCodeChat');
+	const config = vscode.workspace.getConfiguration('ccvc');
 
 	// Always route tool permissions through the stdio prompt tool — never
 	// --dangerously-skip-permissions. The skip flag suppresses can_use_tool
@@ -566,7 +611,7 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 	// this process; these belong to the process, not the turn).
 	rawOutput = '';
 	errorOutput = '';
-	authErrorFired = false;
+	apiErrorFired = false;
 	// Fresh process → its total_cost_usd restarts at ~0, so the cost-delta
 	// baseline must restart too (else the first result computes a bogus delta
 	// against the prior process's final cumulative).
@@ -582,17 +627,6 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 	// orphan (e.g. one we just killed for a respawn) can't null the live handle
 	// or flip isProcessing out from under the current turn.
 	const proc = claudeProcess;
-
-	const fireAuthError = (rawSnippet: string) => {
-		if (authErrorFired) { return; }
-		authErrorFired = true;
-		log.warn('AuthDetection', 'authError fired', { rawSnippet: rawSnippet.trim() }, '🔐');
-		deps!.postMessage({
-			type: 'authError',
-			data: { rawError: rawSnippet.trim().slice(0, 800) }
-		});
-		try { proc.kill('SIGTERM'); } catch { /* already dead */ }
-	};
 
 	if (proc.stdout) {
 		proc.stdout.on('data', (data) => {
@@ -635,8 +669,13 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		proc.stderr.on('data', (data) => {
 			const chunk = data.toString();
 			errorOutput += chunk;
-			if (!authErrorFired && AUTH_PATTERNS.some(p => p.test(chunk))) {
-				fireAuthError(chunk);
+			// Ingress C: provider errors on stderr. Classify by HTTP code first…
+			const cls = classifyApiError(chunk);
+			if (cls.isError) { fireApiError(cls, chunk); return; }
+			// …then fall back to AUTH_PATTERNS for code-less auth phrasings
+			// (e.g. "Not logged in", "please run claude login").
+			if (!apiErrorFired && AUTH_PATTERNS.some(p => p.test(chunk))) {
+				fireApiError({ isError: true, category: 'auth' }, chunk);
 			}
 		});
 	}
@@ -663,7 +702,7 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		pendingSilentQuery = null;
 		awaitingSilentResult = false;
 
-		if (authErrorFired) {
+		if (apiErrorFired) {
 			currentClaudeProcess = undefined;
 			spawnedPlanMode = undefined;
 			queuedTurns = [];
@@ -1350,9 +1389,21 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 							silentQueryCallback = null;
 							continue;
 						}
+						// Ingress A — the channel that leaked the 403: a provider error
+						// can arrive as a plain assistant text block on stdout. Classify
+						// before emitting. Guard with dominant-content (short turn, no
+						// tool_use) so the assistant *discussing* an error in a long
+						// answer is never mistaken for a real failure (see plan §2).
+						const text = content.text.trim();
+						const cls = classifyApiError(text);
+						const turnHadToolUse = jsonData.message.content.some((c: any) => c.type === 'tool_use');
+						if (cls.isError && !turnHadToolUse && text.length <= 600) {
+							fireApiError(cls, text);
+							continue;
+						}
 						conversation.sendAndSaveMessage({
 							type: 'output',
-							data: content.text.trim()
+							data: text
 						});
 					} else if (content.type === 'thinking' && content.thinking.trim()) {
 						conversation.sendAndSaveMessage({
@@ -1389,6 +1440,15 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 								} catch {
 									fileContentBefore = '';
 								}
+							}
+
+							// Mirror the modes skill: any tool touching active_modes.md (it
+							// mostly Reads it, Writes on change) reveals the file's absolute
+							// path. Capture it (cached for future sessions) and re-read so the
+							// prompt pill reflects the real mode. Match on path regardless of
+							// tool name — NOT gated on Edit/Write like the block above.
+							if (typeof content.input.file_path === 'string') {
+								modes.notePathFromStream(content.input.file_path);
 							}
 						}
 
@@ -1500,24 +1560,33 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 			}
 			break;
 
-		case 'result':
+		case 'result': {
 			// A non-'success' subtype (e.g. error_during_execution) or an is_error
 			// success both count as error ends; tell the turn-health monitor so the
 			// indicator resolves to `error` rather than a clean `done`.
 			if (jsonData.subtype !== 'success' || jsonData.is_error) {
 				turnHealth.signal('error');
 			}
-			if (jsonData.subtype === 'success') {
-				if (jsonData.is_error && jsonData.result && (
-					jsonData.result.includes('Invalid API key') ||
-					jsonData.result.includes('Not logged in') ||
-					jsonData.result.includes('/login') ||
-					jsonData.result.includes('not authenticated')
-				)) {
-					handleLoginRequired();
-					return;
-				}
 
+			// Ingress B — provider error carried in the result string (covers
+			// error_during_execution and is_error successes, any subtype). Classify
+			// by HTTP code first…
+			const resultText = typeof jsonData.result === 'string' ? jsonData.result : '';
+			const cls = classifyApiError(resultText);
+			if (cls.isError) { fireApiError(cls, resultText); return; }
+			// …then the legacy login-string fallback for code-less auth phrases
+			// ("Not logged in", "/login", …), classified as auth.
+			if (jsonData.is_error && resultText && (
+				resultText.includes('Invalid API key') ||
+				resultText.includes('Not logged in') ||
+				resultText.includes('/login') ||
+				resultText.includes('not authenticated')
+			)) {
+				fireApiError({ isError: true, category: 'auth' }, resultText);
+				return;
+			}
+
+			if (jsonData.subtype === 'success') {
 				if (jsonData.session_id) {
 					// Adopt the latest reported session_id (authoritative for any
 					// later --resume / --fork-session). The process is NOT respawned
@@ -1594,29 +1663,35 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 			// turn against the still-warm process. The process is NOT closed.
 			onTurnEnd();
 			break;
+		}
 	}
 }
 
-function handleLoginRequired(): void {
-	log.warn('Subprocess', 'handleLoginRequired', undefined, '🔐');
+// Single sink for any detected provider API error, from any ingress path
+// (assistant text, result, stderr). Latches once per process, captures the
+// in-flight turn so Respawn can re-send it, posts the categorized apiError card
+// message, and kills the live process. The close handler's apiErrorFired branch
+// then parks the session (no chain-spawn). Replaces the old fireAuthError.
+function fireApiError(cls: ApiErrorClassification, rawSnippet: string): void {
+	if (apiErrorFired) { return; }
 	if (!deps) { return; }
-
-	// Login failure ends the turn; clear any queued turns since they would also
-	// fail, and reset the turn-health monitor.
-	queuedTurns = [];
-	emitQueueState();
-	turnHealth.reset();
-	isProcessing = false;
-
+	apiErrorFired = true;
+	log.warn('ApiError', 'apiError fired', {
+		category: cls.category,
+		code: cls.code,
+		rawSnippet: rawSnippet.trim().slice(0, 200)
+	}, '🔐');
+	// Capture what to re-send on Respawn (the turn that was mid-flight).
+	lastFailedTurn = currentTurn;
 	deps.postMessage({
-		type: 'setProcessing',
-		data: { isProcessing: false }
+		type: 'apiError',
+		data: {
+			category: cls.category,
+			code: cls.code,
+			detail: rawSnippet.trim().slice(0, 800)
+		}
 	});
-
-	terminalCommands.openLoginTerminal();
-	deps.postMessage({
-		type: 'loginRequired'
-	});
+	try { currentClaudeProcess?.kill('SIGTERM'); } catch { /* already dead */ }
 }
 
 async function killProcessGroup(pid: number, signal: string = 'SIGTERM'): Promise<void> {
@@ -1690,6 +1765,23 @@ export async function killProcess(): Promise<void> {
 
 	if (processToKill && !processToKill.killed) {
 		await killProcessGroup(pid, 'SIGKILL');
+	}
+}
+
+// RESPAWN recovery (the composer's "Respawn" button after a provider API error).
+// Provider-agnostic: a fresh `claude` child re-reads whatever auth applies
+// (Bedrock creds, Anthropic OAuth token, …) at spawn time — we never inspect
+// credentials ourselves. Clears the api-error latch, reaps any parked process,
+// then re-sends the exact turn that failed (captured in lastFailedTurn).
+export async function respawnAndResend(): Promise<void> {
+	if (!deps) { return; }
+	const turn = lastFailedTurn;
+	log.info('ClaudeProcess', 'respawnAndResend', { hasTurn: !!turn }, '♻️');
+	apiErrorFired = false;
+	lastFailedTurn = undefined;
+	await killProcess();
+	if (turn) {
+		await sendMessage(turn.message, turn.planMode, turn.images);
 	}
 }
 

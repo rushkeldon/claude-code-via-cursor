@@ -2,6 +2,34 @@
 
 VS Code/Cursor extension that wraps the Claude Code CLI in a Preact webview. One Claude Code subprocess instance per chat session.
 
+## Compliance guardrails (do not violate)
+
+CCVC is a thin launcher around the user's own locally authenticated `claude`
+process. Authentication is the user's responsibility and happens entirely
+outside this extension. Preserve this posture in every change.
+
+Never do any of the following without an explicit human decision:
+
+- Add a login UI, OAuth flow, or any authentication surface inside the extension.
+- Capture, store, log, cache, or forward credentials of any kind (OAuth tokens,
+  refresh tokens, API keys, or anything an auth flow emits).
+- Make the extension proxy or relay Claude requests using the user's
+  subscription credentials on their behalf.
+- Let the respawn/restart control do anything other than restart the child
+  process. It must never call `claude login` or render a login surface.
+- Introduce headless `claude -p`, background agent loops, scheduling, or batch
+  fan-out that runs Claude without a per-turn user action. Keep the interaction
+  interactive and human-in-the-loop.
+
+Why: Anthropic permits ordinary individual use of Claude Code via the user's own
+auth, but does not permit third parties to offer login or route requests through
+Free/Pro/Max credentials on users' behalf, and expects product/automation use to
+run on API keys. See https://code.claude.com/docs/en/legal-and-compliance
+
+If a task would touch authentication, credential handling, request routing, or
+automation, STOP and flag it for a human before implementing. Full rationale:
+[doc/ccvc_compliance_and_terms.md](doc/ccvc_compliance_and_terms.md).
+
 ## Architecture
 
 - **Extension host** (`src/*.ts`) — manages the Claude Code subprocess, settings persistence, permissions, terminal commands
@@ -25,7 +53,7 @@ One folder per component: `src/webview/components/ComponentName/ComponentName.ts
 Preact signals in `src/webview/state/`. Listeners registered via `on()` at module level so they activate on import.
 
 ### Styling
-Use VS Code CSS variables (`--vscode-*`) for all colors and theming. No hardcoded color values.
+Use VS Code CSS variables (`--vscode-*`) for all colors and theming. No hardcoded color values (mostly).
 
 ### File naming
 All lowercase with underscores as separators (snake_case). Put the general/common part of the name first (left), the specific differentiator last (right) — so files alphabetize by category. Exception: component folders follow PascalCase (`ComponentName/`) since that's idiomatic for Preact/React.

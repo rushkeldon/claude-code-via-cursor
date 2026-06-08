@@ -20,11 +20,56 @@ let selectedModel = 'default';
 let effort: string | undefined;   // undefined = inherit the model's default effort
 let thoughtsOn = true;            // true = display 'summarized', false = 'omitted'
 
+// Config keys that existed under the legacy `claudeCodeChat.*` namespace before
+// the rename to `ccvc.*`. The suffixes are unchanged — only the root moved.
+const LEGACY_CONFIG_KEYS = [
+	'wsl.enabled', 'wsl.distro', 'wsl.nodePath', 'wsl.claudePath',
+	'thinking.show', 'thinking.effort', 'permissions.yoloMode', 'executable.path',
+	'environment.variables', 'environment.disabled',
+	'terminal.useIntegrated', 'terminal.externalApp', 'terminal.customTemplate',
+	'terminal.borderColor', 'terminal.fontColor', 'firstRun.hasShown',
+];
+
+// One-time migration: a namespace rename would otherwise silently orphan the
+// user's saved values (VS Code would find nothing under `ccvc.*` and fall back
+// to declared defaults). This copies any legacy `claudeCodeChat.<key>` value to
+// `ccvc.<key>` when the new key is unset, preserving the original scope
+// (workspace vs global). Copy-only — the old keys are left in place (harmless)
+// so the change stays reversible. Idempotent: gated by a sentinel and a per-key
+// "new value already set" guard, so it never clobbers a choice made under ccvc.
+export async function migrateLegacyConfig(): Promise<void> {
+	const oldCfg = vscode.workspace.getConfiguration('claudeCodeChat');
+	const newCfg = vscode.workspace.getConfiguration('ccvc');
+	if (newCfg.get<boolean>('migratedFromClaudeCodeChat')) {
+		return;
+	}
+	let migrated = 0;
+	for (const key of LEGACY_CONFIG_KEYS) {
+		const inspected = oldCfg.inspect(key);
+		const oldVal = inspected?.workspaceValue ?? inspected?.globalValue;
+		const newInspected = newCfg.inspect(key);
+		const newAlreadySet = newInspected?.workspaceValue !== undefined || newInspected?.globalValue !== undefined;
+		if (oldVal !== undefined && !newAlreadySet) {
+			const target = inspected?.workspaceValue !== undefined
+				? vscode.ConfigurationTarget.Workspace
+				: vscode.ConfigurationTarget.Global;
+			try {
+				await newCfg.update(key, oldVal, target);
+				migrated++;
+			} catch (e) {
+				log.warn('Settings', 'migrateLegacyConfig: copy failed', { key, error: (e as any)?.message ?? String(e) }, '⚠️');
+			}
+		}
+	}
+	await newCfg.update('migratedFromClaudeCodeChat', true, vscode.ConfigurationTarget.Global);
+	log.info('Settings', 'migrateLegacyConfig done', { migrated }, '🔄');
+}
+
 export function init(d: SettingsDeps): void {
 	log.info('Settings', 'init', { hasPostMessage: !!d.postMessage }, '🔧');
 	deps = d;
 	selectedModel = d.workspaceState.get('claude.selectedModel', 'default');
-	const cfg = vscode.workspace.getConfiguration('claudeCodeChat');
+	const cfg = vscode.workspace.getConfiguration('ccvc');
 	const wsThoughts = d.workspaceState.get<boolean | undefined>('claude.thoughtsOn', undefined);
 	thoughtsOn = typeof wsThoughts === 'boolean' ? wsThoughts : cfg.get<boolean>('thinking.show', true);
 	const wsEffort = d.workspaceState.get<string | undefined>('claude.effort', undefined);
@@ -210,9 +255,16 @@ export function getFullModelString(): { configured?: string; resolvedEnv?: strin
 	}
 }
 
+// Fallback for the mode picker when the user hasn't customized `ccvc.modes.items`
+// (kept in sync with the package.json default). Mirrors the package.json shape.
+const DEFAULT_MODE_ITEMS = [
+	{ id: 'agent', label: 'Agent', command: '/modes agent' },
+	{ id: 'plan', label: 'Plan', command: '/modes plan ./doc' },
+];
+
 export function sendCurrentSettings(): void {
 	log.debug('Settings', 'enter sendCurrentSettings', undefined, '➡️');
-	const config = vscode.workspace.getConfiguration('claudeCodeChat');
+	const config = vscode.workspace.getConfiguration('ccvc');
 	const settings = {
 		'wsl.enabled': config.get<boolean>('wsl.enabled', false),
 		'wsl.distro': config.get<string>('wsl.distro', 'Ubuntu'),
@@ -224,7 +276,8 @@ export function sendCurrentSettings(): void {
 		'environment.disabled': config.get<boolean>('environment.disabled', false),
 		'terminal.useIntegrated': config.get<boolean>('terminal.useIntegrated', true),
 		'terminal.externalApp': config.get<string>('terminal.externalApp', ''),
-		'terminal.customTemplate': config.get<string>('terminal.customTemplate', '')
+		'terminal.customTemplate': config.get<string>('terminal.customTemplate', ''),
+		'modes.items': config.get<Array<{ id: string; label: string; command: string }>>('modes.items', DEFAULT_MODE_ITEMS)
 	};
 
 	deps?.postMessage({
@@ -236,7 +289,7 @@ export function sendCurrentSettings(): void {
 
 export async function setEnvsDisabled(disabled: boolean): Promise<void> {
 	log.debug('Settings', 'enter setEnvsDisabled', { disabled }, '➡️');
-	const config = vscode.workspace.getConfiguration('claudeCodeChat');
+	const config = vscode.workspace.getConfiguration('ccvc');
 	await config.update('environment.disabled', disabled, vscode.ConfigurationTarget.Global);
 	sendCurrentSettings();
 	log.debug('Settings', 'exit setEnvsDisabled', undefined, '⬅️');
@@ -244,7 +297,7 @@ export async function setEnvsDisabled(disabled: boolean): Promise<void> {
 
 export async function updateSettings(settings: { [key: string]: any }): Promise<void> {
 	log.debug('Settings', 'enter updateSettings', { keys: Object.keys(settings) }, '➡️');
-	const config = vscode.workspace.getConfiguration('claudeCodeChat');
+	const config = vscode.workspace.getConfiguration('ccvc');
 
 	try {
 		for (const [key, value] of Object.entries(settings)) {
@@ -293,7 +346,7 @@ export async function setSelectedModel(model: string, tierModels?: { sonnet: str
 
 export async function setModelEnvVars(model: string, tierModels?: { sonnet: string; opus: string; haiku: string }): Promise<void> {
 	log.debug('Settings', 'enter setModelEnvVars', { model, tierModels }, '➡️');
-	const config = vscode.workspace.getConfiguration('claudeCodeChat');
+	const config = vscode.workspace.getConfiguration('ccvc');
 	const envVars = config.get<Record<string, string>>('environment.variables', {});
 	envVars['ANTHROPIC_DEFAULT_SONNET_MODEL'] = tierModels?.sonnet || model;
 	envVars['ANTHROPIC_DEFAULT_OPUS_MODEL'] = tierModels?.opus || model;
@@ -304,7 +357,7 @@ export async function setModelEnvVars(model: string, tierModels?: { sonnet: stri
 
 export async function removeModelEnvVars(): Promise<void> {
 	log.debug('Settings', 'enter removeModelEnvVars', undefined, '➡️');
-	const config = vscode.workspace.getConfiguration('claudeCodeChat');
+	const config = vscode.workspace.getConfiguration('ccvc');
 	const envVars = config.get<Record<string, string>>('environment.variables', {});
 	const filtered: Record<string, string> = {};
 	for (const [key, value] of Object.entries(envVars)) {

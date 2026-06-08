@@ -249,6 +249,92 @@
   }
 }
 
+// Mode picker — Cursor-style pill trigger (icon + label + chevron) that opens a
+// menu. Mirrors the connect-menu styling above; the trigger reads as a soft pill.
+.mode-dropdown-wrapper {
+  position: relative;
+}
+
+.mode-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background-color: rgba(128, 128, 128, 0.12);
+  border: 1px solid transparent;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 999px;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+
+  &:hover {
+    background-color: rgba(128, 128, 128, 0.2);
+  }
+
+  .mode-dropdown-icon {
+    display: flex;
+    align-items: center;
+    color: var(--vscode-foreground);
+  }
+
+  svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+}
+
+.mode-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 6px;
+  background-color: var(--vscode-menu-background);
+  border: 1px solid var(--vscode-menu-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  min-width: 180px;
+  padding: 6px 0;
+  z-index: 1000;
+
+  &-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 14px;
+    background: none;
+    border: none;
+    color: var(--vscode-foreground);
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+    transition: background-color 0.1s ease;
+
+    &:hover {
+      background-color: var(--vscode-list-hoverBackground);
+    }
+
+    &-icon {
+      display: flex;
+      align-items: center;
+      color: var(--vscode-descriptionForeground);
+      flex-shrink: 0;
+    }
+
+    &-label {
+      flex: 1;
+    }
+
+    &-check {
+      color: var(--vscode-foreground);
+      flex-shrink: 0;
+    }
+  }
+}
+
 .slash-btn,
 .at-btn,
 .image-btn {
@@ -290,6 +376,19 @@
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+}
+
+// Recovery action shown in place of Send after a provider API error. Amber so it
+// reads as "attention / retry" — distinct from green Send and red Stop.
+.respawn-btn {
+  .action-button();
+  background-color: #f59e0b;
+  color: #1a1a1a;
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background-color: #d97706;
   }
 }
 

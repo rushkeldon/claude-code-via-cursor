@@ -14,6 +14,16 @@ export interface FullSettings {
   "terminal.useIntegrated": boolean;
   "terminal.externalApp": string;
   "terminal.customTemplate": string;
+  "modes.items"?: ModeItem[];
+}
+
+// One entry in the prompt mode picker. Configured via `ccvc.modes.items`; each
+// click sends `command` as an explicit message. `id` 'agent'/'plan' drive the
+// status pill and get built-in icons.
+export interface ModeItem {
+  id: string;
+  label: string;
+  command: string;
 }
 
 export interface PermissionsData {
@@ -54,6 +64,23 @@ export const pendingModel = signal<string | undefined>(undefined);
 // effort: the chosen depth level, or undefined to inherit the model default.
 export const thoughtsOn = signal<boolean>(true);
 export const effort = signal<string | undefined>(undefined);
+
+// Mode picker state. `modeItems` is the configured menu (from settings, with a
+// built-in fallback). `activeMode` is the *real* active mode read from the modes
+// skill's active_modes.md by the host — the pill reflects this, never an
+// optimistic click. plan↔agent is a mutex, so it's exactly one of the two.
+const DEFAULT_MODE_ITEMS: ModeItem[] = [
+  { id: "agent", label: "Agent", command: "/modes agent" },
+  { id: "plan", label: "Plan", command: "/modes plan ./doc" },
+];
+export const modeItems = signal<ModeItem[]>(DEFAULT_MODE_ITEMS);
+export const activeMode = signal<"agent" | "plan">("agent");
+
+on("setActiveMode", (msg: any) => {
+  if (msg.data?.mode === "agent" || msg.data?.mode === "plan") {
+    activeMode.value = msg.data.mode;
+  }
+});
 
 on("modelConfig", (msg) => {
   modelConfig.value = msg.data;
@@ -96,6 +123,12 @@ on("detectedTerminals", (msg) => {
 on("settingsData", (msg: any) => {
   const prev = fullSettings.value;
   fullSettings.value = msg.data;
+
+  // Refresh the mode picker from settings (fall back to built-ins if absent/empty).
+  const items = msg.data?.["modes.items"];
+  if (Array.isArray(items) && items.length > 0) {
+    modeItems.value = items;
+  }
 
   const yoloNow = msg.data?.["permissions.yoloMode"];
   const yoloBefore = prev?.["permissions.yoloMode"];

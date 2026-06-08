@@ -32,6 +32,8 @@ export type MessageToExtension =
   | { type: 'resumeSession'; sessionId?: string }
   | { type: 'forkSession'; sessionId?: string }
   | { type: 'launchColdTerminal' }
+  | { type: 'respawn' }
+  | { type: 'openTerminal' }
 
 export type MessageFromExtension =
   | { type: 'ready'; data: string }
@@ -46,7 +48,7 @@ export type MessageFromExtension =
   | { type: 'sessionId'; data: string }
   | { type: 'conversationList'; data: any[] }
   | { type: 'imageAttached'; filePath: string; thumbnailUri: string }
-  | { type: 'authError'; data: { rawError: string } }
+  | { type: 'apiError'; data: { category: 'auth' | 'rate-limit' | 'bad-request' | 'server' | 'client'; code?: number; detail?: string } }
   | { type: 'turnActivity'; data: { state: 'opening' | 'active' | 'quiet' | 'done' | 'errored'; kind?: 'thinking' | 'text' | 'tool' | 'compacting' } }
   | { type: 'modelConfig'; data: { model?: string; globalDefault?: string; needsFirstRun: boolean } }
   | { type: 'modelList'; data: { models: Array<{ value: string; displayName?: string; description?: string; supportedEffortLevels?: string[]; supportsAdaptiveThinking?: boolean; supportsEffort?: boolean }>; selected?: string } }
@@ -60,6 +62,7 @@ export type MessageFromExtension =
   | { type: 'updateTotals'; data: any }
   | { type: 'contextUsage'; data: { totalTokens: number; maxTokens: number; percentage: number; autoCompactThreshold: number; isAutoCompactEnabled: boolean; categories: Array<{ name: string; tokens: number }> } }
   | { type: 'settingsData'; data: any }
+  | { type: 'setActiveMode'; data: { mode: 'agent' | 'plan' } }
   | { type: 'permissionsData'; data: any }
   | { type: 'permissionRequest'; data: { id: string; tool: string; input: Record<string, any>; pattern?: string; suggestions?: any[]; decisionReason?: any; blockedPath?: any; status: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled' } }
   | { type: 'updatePermissionStatus'; data: { id: string; status: 'approved' | 'denied' | 'expired' | 'cancelled' } }

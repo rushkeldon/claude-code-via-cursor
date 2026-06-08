@@ -9,6 +9,7 @@ import * as conversation from './conversation';
 import * as permissions from './permissions';
 import * as skillsAndPlugins from './skillsAndPlugins';
 import * as subprocess from './subprocess';
+import * as modes from './modes';
 import * as sessionLock from './sessionLock';
 import * as webview from './webview';
 import { sweepOrphanImages } from './sessionImages';
@@ -35,6 +36,12 @@ export function activate(context: vscode.ExtensionContext) {
 		getPackageVersion: () => context.extension?.packageJSON?.version
 	});
 	profile.init({ postMessage: (msg: any) => webview.postMessage(msg) });
+	// One-time copy of legacy `claudeCodeChat.*` settings to the renamed `ccvc.*`
+	// namespace, so the rename doesn't silently reset the user's saved config.
+	// Best-effort + idempotent; runs before init reads any config value.
+	settings.migrateLegacyConfig().catch((e) =>
+		log.warn('Extension', 'migrateLegacyConfig failed', { error: e?.message ?? String(e) }, '⚠️')
+	);
 	settings.init({
 		postMessage: (msg: any) => webview.postMessage(msg),
 		workspaceState: context.workspaceState,
@@ -76,6 +83,15 @@ export function activate(context: vscode.ExtensionContext) {
 		getGlobalState: () => context.globalState
 	});
 
+	// Mode-state mirror: reflects the modes skill's active_modes.md in the prompt
+	// pill. Reads + watches the file if we cached its path in a prior session;
+	// otherwise the path is discovered from the tool-call stream (subprocess).
+	modes.init({
+		postMessage: (msg) => webview.postMessage(msg),
+		workspaceState: context.workspaceState,
+		subscriptions: context.subscriptions
+	});
+
 	// Cross-window single-writer lock (per session id). Uses the global storage
 	// path so the lock is shared across windows of the same workspace.
 	sessionLock.init(context.globalStorageUri.fsPath);
@@ -108,8 +124,12 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Listen for configuration changes
 	const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(event => {
-		if (event.affectsConfiguration('claudeCodeChat.wsl')) {
+		if (event.affectsConfiguration('ccvc.wsl')) {
 			webview.newSessionOnConfigChange();
+		}
+		// Live-reload the mode picker when its items change — no window reload needed.
+		if (event.affectsConfiguration('ccvc.modes.items')) {
+			settings.sendCurrentSettings();
 		}
 	});
 
