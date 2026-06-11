@@ -3,7 +3,7 @@
 .settings-modal-content {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 .settings-loading {
@@ -13,23 +13,55 @@
   padding: 20px;
 }
 
+// Each settings group is a bordered card: a filled header bar "caps" the section,
+// with the controls in a padded body below. Uses native theme vars so it tracks
+// the active VS Code theme.
+.settings-section {
+  border: 1px solid var(--vscode-panel-border, var(--vscode-input-border));
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+}
+
 .settings-section-title {
-  margin: 0 0 8px 0;
-  font-size: 14px;
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 12px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--vscode-foreground);
+  // Filled header bar, separated from the body by a bottom border. Falls back
+  // through a few native surfaces so it reads as "darker than the body" on any theme.
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-titleBar-inactiveBackground, var(--vscode-input-background)));
+  border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-input-border));
+}
+
+// Body padding for everything under the header (hint + controls).
+.settings-section > .settings-hint,
+.settings-section > .settings-group {
+  margin-left: 12px;
+  margin-right: 12px;
 }
 
 .settings-hint {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
-  margin: 0 0 12px 0;
+  margin: 12px 0;
+}
+
+// When a hint is immediately followed by the group, tighten the gap between them.
+.settings-section > .settings-hint + .settings-group {
+  margin-top: 0;
 }
 
 .settings-group {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  // Bottom breathing room inside the card (the side margins come from the
+  // `.settings-section > .settings-group` rule above).
+  margin-bottom: 12px;
 }
 
 .settings-checkbox {

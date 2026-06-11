@@ -375,6 +375,53 @@ function CustomizeSection() {
   );
 }
 
+function ModesSection() {
+  const s = fullSettings.value;
+  if (!s) return null;
+
+  // Each field is a blind passthrough command to Claude. Empty → the placeholder
+  // (the built-in default) is what actually fires; a truthy value overrides it.
+  return (
+    <div class="settings-section">
+      <h3 class="settings-section-title">Modes</h3>
+      <p class="settings-hint">
+        The mode menu sends these 'commands' directly to Claude Code. Leave a
+        field empty to use the built-in default shown in the placeholder.
+      </p>
+      <div class="settings-group">
+        <div class="settings-field">
+          <label>Plan</label>
+          <input
+            type="text"
+            value={s["modes.planCommand"] || ""}
+            placeholder="/modes plan ./doc"
+            onBlur={(e) =>
+              updateSetting(
+                "modes.planCommand",
+                (e.target as HTMLInputElement).value,
+              )
+            }
+          />
+        </div>
+        <div class="settings-field">
+          <label>Agent</label>
+          <input
+            type="text"
+            value={s["modes.agentCommand"] || ""}
+            placeholder="/modes agent"
+            onBlur={(e) =>
+              updateSetting(
+                "modes.agentCommand",
+                (e.target as HTMLInputElement).value,
+              )
+            }
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModelSection() {
   const cfg = modelConfig.value;
   if (!cfg) {
@@ -719,6 +766,7 @@ export function SettingsModal() {
       ) : fullSettings.value ? (
         <div class="settings-modal-content">
           <ModelSection />
+          <ModesSection />
           <WSLSection />
           <TerminalSection />
           <PermissionsSection />

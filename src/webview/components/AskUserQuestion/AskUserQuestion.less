@@ -65,6 +65,75 @@
   }
 }
 
+// Resolved cards are a frozen, read-only record of what the user submitted. The
+// native disabled radio/checkbox renders as an indistinct gray blob in the dark
+// theme — you can't tell which option was picked. So for decided cards we draw a
+// custom indicator: a clear filled dot/check on the chosen option, an empty ring
+// on the rest, everything dimmed so it reads as locked. Pending cards keep the
+// native controls (untouched) so live answering behaves normally.
+.ask-user-question.decided {
+  .question-option {
+    cursor: default;
+
+    &:hover {
+      background: none;
+    }
+
+    input {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      margin-top: 2px;
+      flex-shrink: 0;
+      border: 1px solid var(--vscode-descriptionForeground);
+      background: transparent;
+      opacity: 0.6;
+      position: relative;
+      cursor: default;
+    }
+
+    // Radios are round, checkboxes squared.
+    input[type="radio"] {
+      border-radius: 50%;
+    }
+    input[type="checkbox"] {
+      border-radius: 3px;
+    }
+
+    // Selected: filled center dot (radio) / check fill (checkbox), brought up to
+    // full opacity so the chosen answer stands out from the dimmed siblings.
+    input:checked {
+      opacity: 0.9;
+      border-color: var(--vscode-foreground);
+    }
+
+    input[type="radio"]:checked::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--vscode-foreground);
+      transform: translate(-50%, -50%);
+    }
+
+    input[type="checkbox"]:checked::after {
+      content: "";
+      position: absolute;
+      top: 1px;
+      left: 4px;
+      width: 3px;
+      height: 7px;
+      border: solid var(--vscode-foreground);
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+  }
+}
+
 .ask-question-chevron {
   font-size: 10px;
   color: var(--vscode-descriptionForeground);

@@ -37,6 +37,10 @@ function openFile(filePath: string) {
   post({ type: "openFile", filePath } as any);
 }
 
+function openExternalUrl(url: string) {
+  post({ type: "openExternalUrl", url } as any);
+}
+
 export function ToolUseMessage({
   toolName,
   content,
@@ -54,6 +58,15 @@ export function ToolUseMessage({
     ? (rawInput?.description as string | undefined)
     : undefined;
 
+  // WebFetch carries the target URL in rawInput.url. Surface it inline (clickable,
+  // right-aligned, start-truncated) exactly like a file-path tool's path, so the
+  // card reads as a one-liner showing what's being fetched — and you can click to
+  // open the same URL. (WebSearch isn't available to us, so we don't handle it.)
+  const fetchUrl =
+    toolName === "WebFetch" && typeof rawInput?.url === "string"
+      ? (rawInput.url as string)
+      : undefined;
+
   // For an absolute file path, put a clickable cursor:// link on the clipboard
   // instead of the bare path. Other copies (Bash command, content) stay plain.
   const clipboardValue = hasClickablePath ? toCursorLink(filePath) : copyText;
@@ -63,9 +76,10 @@ export function ToolUseMessage({
   // visible. Other tools (Bash, etc.) keep their multi-line body below the header.
   const inlinePath = hasClickablePath;
 
-  // Single-line header: file-path tools (inline path) AND the subagent card (name +
-  // description on one line). The --inline class drops the body divider/margin.
-  const inlineHeader = inlinePath || isAgent;
+  // Single-line header: file-path tools (inline path), the subagent card (name +
+  // description), and WebFetch (name + url). The --inline class drops the body
+  // divider/margin so the whole card is one line tall.
+  const inlineHeader = inlinePath || isAgent || !!fetchUrl;
 
   // Category drives the shared --tool-accent CSS vars (set by cat-<category> on
   // the message root), which color BOTH the icon gradient and the accent border.
@@ -77,12 +91,18 @@ export function ToolUseMessage({
   // a body. Opt ChatMessage out of its own header-collapse (collapsible={false})
   // since the tool-header owns the toggle here.
   const hasBody = !!content && !inlineHeader;
+
+  // A tool with no foldable body (e.g. WebFetch, or any tool whose input we don't
+  // render) must still get the compact, divider-less header — otherwise the base
+  // .tool-header shows a horizontal rule with empty space beneath it. Treat any
+  // bodyless card as inline so it reads as a clean one-liner like Read/Edit.
+  const inlineNoBody = !hasBody;
   const { displayed, toggle, chevron } = useCollapsible(true);
 
   return (
     <ChatMessage type="tool" showHeader={false} accent={category} collapsible={false}>
       <div
-        class={`tool-header${inlineHeader ? " tool-header--inline" : ""}${hasBody ? " tool-header--toggle" : ""}`}
+        class={`tool-header${inlineHeader || inlineNoBody ? " tool-header--inline" : ""}${hasBody ? " tool-header--toggle" : ""}${hasBody && !displayed ? " tool-header--collapsed" : ""}`}
         onClick={hasBody ? toggle : undefined}
         role={hasBody ? "button" : undefined}
         title={hasBody ? (displayed ? "Collapse" : "Expand") : undefined}
@@ -106,7 +126,23 @@ export function ToolUseMessage({
             onClick={(e) => { e.stopPropagation(); openFile(filePath); }}
             title={filePath}
           >
-            {filePath}
+            {/* `direction: rtl` (for left-side ellipsis) reorders the path's
+                leading "/" — a bidi-neutral char — to the visual end, making it
+                look like a trailing slash. Prefix a Left-to-Right Mark (U+200E)
+                to anchor the slash inside the LTR run so it stays in front. */}
+            {"‎" + filePath}
+          </span>
+        )}
+        {fetchUrl && (
+          // WebFetch target URL: right-aligned, clickable to open externally, and
+          // end-truncated (ellipsis on the right) since the scheme+domain at the
+          // start are the most identifying part of a URL.
+          <span
+            class="tool-file-link tool-url-link--inline"
+            onClick={(e) => { e.stopPropagation(); openExternalUrl(fetchUrl); }}
+            title={fetchUrl}
+          >
+            {fetchUrl}
           </span>
         )}
         {copyText && (

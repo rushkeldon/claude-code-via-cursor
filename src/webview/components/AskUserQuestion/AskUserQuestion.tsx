@@ -157,13 +157,21 @@ export function QuestionCard({ data, isResolved }: QuestionCardProps) {
     const answers: Record<string, string> = {};
     data.questions.forEach((q, idx) => {
       const freeText = freeTexts[idx]?.trim();
-      if (freeText) {
+      const selected = selections[idx];
+      const hasSelection = !!(selected && selected.length > 0);
+      const selectedText = hasSelection ? selected.join(", ") : "";
+
+      // Selection + free text are NOT either/or — when the user does both, the
+      // chosen option is the answer and the typed text is a qualifier (a small
+      // addition, exclusion, or exception to that option). Frame it so the
+      // reader (the agent) understands that relationship rather than seeing two
+      // unrelated strings. When only one is present, send it bare.
+      if (hasSelection && freeText) {
+        answers[q.question] = `${selectedText} (with this qualification: ${freeText})`;
+      } else if (freeText) {
         answers[q.question] = freeText;
-      } else {
-        const selected = selections[idx];
-        if (selected && selected.length > 0) {
-          answers[q.question] = selected.join(", ");
-        }
+      } else if (hasSelection) {
+        answers[q.question] = selectedText;
       }
     });
     submitAnswers(data.id, answers, { selections, freeTexts });
@@ -290,15 +298,11 @@ export function QuestionCard({ data, isResolved }: QuestionCardProps) {
               </button>
             </div>
           )}
-          {data.status === "answered" && data.answers && (
-            <div class="ask-question-decision">
-              {Object.entries(data.answers).map(([q, a]) => (
-                <div key={q}>
-                  <strong>{q}</strong>: {a}
-                </div>
-              ))}
-            </div>
-          )}
+          {/* No answer echo for "answered" cards: the frozen, grayed-out radios +
+              read-only free text above ARE the record of what the user submitted.
+              A separate text summary was redundant and unreadable. Cancelled and
+              expired cards keep a short status line since they have no selection
+              to speak for them. */}
           {cancelled && (
             <div class="ask-question-decision expired">
               Declined to answer (cancelled)

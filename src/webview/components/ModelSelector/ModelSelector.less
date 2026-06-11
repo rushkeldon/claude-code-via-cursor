@@ -5,6 +5,15 @@
   margin-top: 6px;
   margin-bottom: 6px;
   position: relative;
+
+  // Normalize to the UI chrome font. Buttons/inputs don't inherit font-family
+  // by default (they use the UA font), so set it explicitly across the control.
+  font-family: var(--vscode-font-family);
+
+  button,
+  input {
+    font-family: var(--vscode-font-family);
+  }
 }
 
 .model-dropdown-btn {

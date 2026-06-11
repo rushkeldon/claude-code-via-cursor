@@ -24,7 +24,7 @@ function renderMessage(msg: ChatMsg & { elapsedLabel?: string }, index: number) 
     case 'error':
       return <ErrorMessage key={index} content={msg.content} />;
     case 'thinking' as any:
-      return <ThinkingPill key={index} content={msg.content} elapsedLabel={msg.elapsedLabel || '?'} noThoughts={msg.noThoughts} />;
+      return <ThinkingPill key={index} content={msg.content} elapsedLabel={msg.elapsedLabel || '?'} />;
     case 'question' as any:
       return msg.questionData ? <InlineQuestionCard key={index} questionData={msg.questionData} /> : null;
     case 'permission' as any:

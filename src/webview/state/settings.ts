@@ -14,12 +14,17 @@ export interface FullSettings {
   "terminal.useIntegrated": boolean;
   "terminal.externalApp": string;
   "terminal.customTemplate": string;
+  // Raw per-mode command overrides (empty = use built-in default). Edited in the
+  // Settings dialog's Modes section.
+  "modes.planCommand"?: string;
+  "modes.agentCommand"?: string;
+  // Resolved two-item picker list (override-or-default), built by the host.
   "modes.items"?: ModeItem[];
 }
 
-// One entry in the prompt mode picker. Configured via `ccvc.modes.items`; each
-// click sends `command` as an explicit message. `id` 'agent'/'plan' drive the
-// status pill and get built-in icons.
+// One entry in the prompt mode picker — exactly Plan + Agent. Each click sends
+// `command` as an explicit message (a blind passthrough to Claude). `command` is
+// resolved host-side from `ccvc.modes.{plan,agent}Command` (override or default).
 export interface ModeItem {
   id: string;
   label: string;
@@ -124,7 +129,10 @@ on("settingsData", (msg: any) => {
   const prev = fullSettings.value;
   fullSettings.value = msg.data;
 
-  // Refresh the mode picker from settings (fall back to built-ins if absent/empty).
+  // Refresh the mode picker from the resolved list the host sends (already
+  // override-or-default, guaranteed non-empty with valid commands). Guard only
+  // against a missing/empty array (e.g. an older host build) so the built-in
+  // default is retained rather than going empty.
   const items = msg.data?.["modes.items"];
   if (Array.isArray(items) && items.length > 0) {
     modeItems.value = items;

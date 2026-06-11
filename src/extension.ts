@@ -4,7 +4,6 @@ import * as os from 'os';
 import { initLogger, log } from './logger';
 import * as profile from './profile';
 import * as settings from './settings';
-import * as backupRepo from './backupRepo';
 import * as conversation from './conversation';
 import * as permissions from './permissions';
 import * as skillsAndPlugins from './skillsAndPlugins';
@@ -36,23 +35,11 @@ export function activate(context: vscode.ExtensionContext) {
 		getPackageVersion: () => context.extension?.packageJSON?.version
 	});
 	profile.init({ postMessage: (msg: any) => webview.postMessage(msg) });
-	// One-time copy of legacy `claudeCodeChat.*` settings to the renamed `ccvc.*`
-	// namespace, so the rename doesn't silently reset the user's saved config.
-	// Best-effort + idempotent; runs before init reads any config value.
-	settings.migrateLegacyConfig().catch((e) =>
-		log.warn('Extension', 'migrateLegacyConfig failed', { error: e?.message ?? String(e) }, '⚠️')
-	);
 	settings.init({
 		postMessage: (msg: any) => webview.postMessage(msg),
 		workspaceState: context.workspaceState,
 		globalState: context.globalState
 	});
-	backupRepo.init({
-		postMessage: (msg) => webview.postMessage(msg),
-		sendAndSaveMessage: (msg) => conversation.sendAndSaveMessage(msg),
-		storagePath: context.storageUri?.fsPath
-	});
-	backupRepo.initializeBackupRepo();
 	conversation.init({
 		postMessage: (msg) => webview.postMessage(msg),
 		workspaceState: context.workspaceState
@@ -127,8 +114,10 @@ export function activate(context: vscode.ExtensionContext) {
 		if (event.affectsConfiguration('ccvc.wsl')) {
 			webview.newSessionOnConfigChange();
 		}
-		// Live-reload the mode picker when its items change — no window reload needed.
-		if (event.affectsConfiguration('ccvc.modes.items')) {
+		// Live-reload the mode picker when either mode command changes — no window
+		// reload needed. Watches the whole `ccvc.modes` namespace (planCommand +
+		// agentCommand).
+		if (event.affectsConfiguration('ccvc.modes')) {
 			settings.sendCurrentSettings();
 		}
 	});
@@ -136,7 +125,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// Create status bar item
 	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	statusBarItem.text = "Claude";
-	statusBarItem.tooltip = "Open Claude Code Chat (Ctrl+Shift+C)";
+	statusBarItem.tooltip = "Open CCVC (Ctrl+Shift+C)";
 	statusBarItem.command = 'claude-code-via-cursor.openChat';
 	statusBarItem.show();
 

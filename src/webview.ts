@@ -8,11 +8,11 @@ import * as tokenCounters from "./tokenCounters";
 import * as profile from "./profile";
 import * as terminalCommands from "./terminalCommands";
 import * as settings from "./settings";
-import * as backupRepo from "./backupRepo";
 import * as conversation from "./conversation";
 import * as permissions from "./permissions";
 import * as skillsAndPlugins from "./skillsAndPlugins";
 import * as subprocess from "./subprocess";
+import * as modes from "./modes";
 import * as sessionLock from "./sessionLock";
 
 type PostMessageFn = (message: any) => void;
@@ -172,7 +172,6 @@ export async function newSession(): Promise<void> {
 
   conversation.setCurrentSessionId(undefined);
 
-  backupRepo.resetCommits();
   conversation.newSession();
 
   tokenCounters.resetTotals();
@@ -433,9 +432,6 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "newSession":
       newSession();
       return;
-    case "restoreCommit":
-      await backupRepo.restoreToCommit(message.commitSha);
-      return;
     case "getConversationList":
       conversation.sendConversationList();
       // Also surface which sessions are locked by another live window so the
@@ -484,6 +480,10 @@ async function handleWebviewMessage(message: any): Promise<void> {
       // Resync the queued-prompt card after a (re)mount — its only other emit
       // sites are queue mutations, which a fresh webview would have missed.
       subprocess.emitQueueState();
+      // Resync the mode pill: modes.init()'s startup read fires during activate(),
+      // before the webview's listeners exist, so that setActiveMode push is lost.
+      // Re-push now that the freshly-mounted webview is listening.
+      modes.resync();
       return;
     case "firstRunShown":
       // The first-run modal actually rendered; latch the flags so it shows once.
@@ -516,9 +516,9 @@ async function handleWebviewMessage(message: any): Promise<void> {
       await subprocess.skullProcess();
       return;
     case "respawn":
-      // Recovery after a provider API error: respawn fresh (re-reads auth) and
-      // re-send the turn that failed.
-      await subprocess.respawnAndResend();
+      // Recovery after a provider API error: respawn a fresh process (re-reads
+      // auth). Does NOT resend the failed turn — the user re-sends if they want.
+      await subprocess.respawn();
       return;
     case "sendNow":
       // Explicit interrupt + flush the head queued item now (the card's ⬆).

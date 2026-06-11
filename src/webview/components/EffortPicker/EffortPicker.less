@@ -1,6 +1,14 @@
 .effort-picker {
   position: relative;
   display: inline-flex;
+
+  // Normalize to the UI chrome font. Buttons don't inherit font-family by
+  // default (they use the UA font), so set it explicitly across the control.
+  font-family: var(--vscode-font-family);
+
+  button {
+    font-family: var(--vscode-font-family);
+  }
 }
 
 .effort-btn {

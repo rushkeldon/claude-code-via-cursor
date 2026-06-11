@@ -31,11 +31,12 @@
   letter-spacing: 0.04em;
   padding: 2px 6px;
   border-radius: 10px;
-  // The Matrix-green left-bar gradient from the real user message
-  // (.message.user::before) — so the badge reads as "user prompt, waiting."
-  background: linear-gradient(180deg, #00ff41 0%, #008f11 100%);
-  // Dark text on the bright phosphor green keeps the label legible.
-  color: #001b00;
+  // Flat outline style — green border (same green-500 #22c55e as the Send
+  // button) and green text on no background, so it reads as a status label, not
+  // a clickable button.
+  background: none;
+  border: 1px solid #22c55e;
+  color: #22c55e;
 }
 
 .queued-prompt-count {
@@ -44,9 +45,8 @@
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 10px;
-  background-color: var(--vscode-badge-background);
-  // Solid mid-green sampled from the badge gradient (#00ff41 → #008f11),
-  // so the overflow count reads as a quiet accent in the user's green.
+  // No background — just the green text as-is.
+  background: none;
   color: #00c728;
   opacity: 0.85;
 }
@@ -65,6 +65,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--vscode-input-foreground);
+  // Match the monospace the prompt uses once sent (.message.user in chat
+  // history) so a queued prompt reads identically before and after sending.
+  font-family: var(--vscode-editor-font-family);
 }
 
 .queued-prompt-actions {

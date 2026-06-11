@@ -99,15 +99,15 @@ function commitToPill() {
   if (!content.trim()) {
     // No thought text this turn. If the user asked to see thoughts (On) but none
     // arrived (e.g. Bedrock-4.8 doesn't honor the display flag), leave a
-    // timer-only pill with an honest note so the empty toggle reads as
-    // informative, not broken. If thoughts are Off, just reset — the live bubble
-    // already gave feedback during the turn.
+    // timer-only pill ("Thought for Xs"). It has no expand chevron, so the
+    // absence of foldable content is self-evident — no explanatory note needed.
+    // If thoughts are Off, just reset — the live bubble already gave feedback
+    // during the turn.
     if (thoughtsOn.value) {
       messages.value = [...messages.value, {
         role: 'thinking',
         content: '',
         elapsedLabel,
-        noThoughts: true,
         timestamp: Date.now(),
       }];
     }

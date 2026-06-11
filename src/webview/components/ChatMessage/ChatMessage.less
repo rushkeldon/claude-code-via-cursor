@@ -5,6 +5,13 @@
   padding: 4px 6px 6px 6px;
   border-radius: 4px;
 
+  // A thinking pill belongs to the Claude turn it follows. Pull it up tight
+  // against this card (the pill carries the air below it — see ThinkingPill.less)
+  // so the thought reads as attached to Claude, not floating toward the next card.
+  &:has(+ .thinking-pill) {
+    margin-bottom: 2px;
+  }
+
   &.user {
     border: 1px solid rgba(0, 255, 65, 0.25);
     border-radius: 8px;
@@ -159,6 +166,18 @@
   // when the message is hovered.
   &:hover .copy-button {
     opacity: 0.7;
+  }
+
+  // Collapsed: only the header shows. Strip the header's divider (margin +
+  // padding + border-bottom) so the row reads as a single compact line the
+  // same height as a collapsed READ tool card (4px top + line + 6px bottom).
+  // The divider is only meaningful when expanded, to split header from content.
+  &.collapsed {
+    .message-header {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
   }
 }
 

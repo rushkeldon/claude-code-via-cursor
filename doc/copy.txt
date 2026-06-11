@@ -1,0 +1,5 @@
+was :
+The command each mode pill sends when clicked. Sent verbatim to Claude — point it at any slash command or mode directive. Leave a field empty to use the built-in default shown in the placeholder.
+
+change to :
+The mode menu sends these 'commands' directly to Claude Code. Leave a field empty to use the built-in default shown in the placeholder.

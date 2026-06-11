@@ -3,7 +3,7 @@ import { signal } from "@preact/signals";
 import { VNode } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { post, on } from "../../vscode";
-import { processing, respawnAvailable } from "../../state/session";
+import { processing } from "../../state/session";
 import { commandList } from "../../state/commands";
 import { modeItems, activeMode, type ModeItem } from "../../state/settings";
 import { ModelSelector } from "../ModelSelector/ModelSelector";
@@ -47,7 +47,14 @@ const MODE_ICONS: Record<string, VNode> = {
 // Generic fallback icon for user-added mode ids without a built-in glyph.
 const MODE_ICON_FALLBACK: VNode = (
   <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
-    <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.6" />
+    <circle
+      cx="10"
+      cy="10"
+      r="7"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+    />
   </svg>
 );
 function iconForMode(id: string): VNode {
@@ -109,7 +116,6 @@ on("fileDropped" as any, (msg: any) => {
 export function PromptPane() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isProcessing = processing.value;
-  const canRespawn = respawnAvailable.value;
 
   // Mode picker open/close, mirroring ModelSelector's outside-click handling.
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
@@ -117,7 +123,10 @@ export function PromptPane() {
   useEffect(() => {
     if (!modeMenuOpen) return;
     const close = (e: Event) => {
-      if (modeRootRef.current && !modeRootRef.current.contains(e.target as Node))
+      if (
+        modeRootRef.current &&
+        !modeRootRef.current.contains(e.target as Node)
+      )
         setModeMenuOpen(false);
     };
     document.addEventListener("mousedown", close);
@@ -220,13 +229,6 @@ export function PromptPane() {
     post({ type: "skull" } as any);
   }
 
-  function respawnRequest() {
-    // Recover from a provider API error: respawn fresh (re-reads auth) and
-    // re-send the failed turn. Clears the local flag immediately for snappy UI;
-    // setProcessing(true) from the resent turn keeps it cleared.
-    respawnAvailable.value = false;
-    post({ type: "respawn" } as any);
-  }
 
   function handleKeyDown(e: KeyboardEvent) {
     if (terminalMode.value) {
@@ -600,7 +602,8 @@ export function PromptPane() {
                   // custom label), falling back to a capitalized id if not listed.
                   const current = items.find((m) => m.id === active);
                   const pillLabel =
-                    current?.label ?? active.charAt(0).toUpperCase() + active.slice(1);
+                    current?.label ??
+                    active.charAt(0).toUpperCase() + active.slice(1);
                   return (
                     <button
                       class="mode-dropdown-btn"
@@ -608,7 +611,9 @@ export function PromptPane() {
                       onClick={() => setModeMenuOpen(!modeMenuOpen)}
                       title="Mode"
                     >
-                      <span class="mode-dropdown-icon">{iconForMode(active)}</span>
+                      <span class="mode-dropdown-icon">
+                        {iconForMode(active)}
+                      </span>
                       <span class="mode-dropdown-text">{pillLabel}</span>
                       <svg
                         width="8"
@@ -638,11 +643,11 @@ export function PromptPane() {
                           aria-selected={isSel}
                           onClick={() => selectMode(m)}
                         >
-                          <span class="mode-menu-item-icon">{iconForMode(m.id)}</span>
+                          <span class="mode-menu-item-icon">
+                            {iconForMode(m.id)}
+                          </span>
                           <span class="mode-menu-item-label">{m.label}</span>
-                          {isSel && (
-                            <span class="mode-menu-item-check">✓</span>
-                          )}
+                          {isSel && <span class="mode-menu-item-check">✓</span>}
                         </button>
                       );
                     })}
@@ -753,16 +758,11 @@ export function PromptPane() {
                   <path d="M12.8 6.5v5q0 .5-.35.85-.3.35-.8.35H2.3q-.5 0-.8-.35a1.16 1.16 0 0 1-.35-.85v-7q0-.45.35-.8.3-.35.8-.35h7m-5.85 2.9L5.2 8 3.45 9.75m3.5 0H9.3M9.4 6.675l5.25-5.25M12.3 1.975l2.35-.55-.6 2.3" />
                 </svg>
               </button>
-              {canRespawn ? (
-                <button
-                  class="respawn-btn"
-                  type="button"
-                  onClick={respawnRequest}
-                  title="Respawn the process (re-reads auth) and re-send the failed turn"
-                >
-                  respawn
-                </button>
-              ) : !isProcessing ? (
+              {/* No prompt-pane respawn button: skull is the mid-turn kill, and the
+                  auth-error card carries its own Respawn after a dead-session error
+                  (see doc/archive/wedged_turn_elapsed_indicator.plan.md). The composer
+                  just shows send (idle) or stop/skull (in flight). */}
+              {!isProcessing ? (
                 <button class="send-btn" type="button" onClick={sendMessage}>
                   send
                 </button>
@@ -790,7 +790,14 @@ export function PromptPane() {
                     onClick={skullRequest}
                     title="Hard-kill the process (and subagents) and park the session to History"
                   >
-                    💀
+                    <svg viewBox="0 0 36 36">
+                      <path
+                        fill="none"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M5.1 20.6q-1.8-4.4-1.35-8.1.4-3.35 2.55-5.8 2-2.3 5.2-3.55 3.05-1.2 6.5-1.2t6.5 1.2q3.2 1.25 5.2 3.55 2.15 2.45 2.55 5.8.45 3.7-1.35 8.1 2.35 6.1-4.2 7.45l-.45 2.9q-.05 1.75-2.15 2.5-2 .6-6.55.6-3.65 0-5.65-.6-2.1-.75-2.15-2.5l-.45-2.9Q2.75 26.7 5.1 20.6M17.9 5.05V6.8q2.25 0 3.8 1.6 1.6 1.55 1.6 3.8h1.75m-4.1 0h2.35q0 2.25-1.6 3.8-1.55 1.6-3.8 1.6v1.75m2 4.35q-.5-.9-.35-1.55.15-.7 1-1.3 2.15-1.25 4.1-1.45 2.55-.3 3 1.25.55 1.8-.2 3.15-.7 1.25-2.15 1.8-1.45.5-2.95.05-1.55-.5-2.45-1.95m-2-14.55V6.8q-2.25 0-3.85 1.6-1.55 1.55-1.55 3.8h2.35m-4.1 0h1.75q0 2.25 1.55 3.8 1.6 1.6 3.85 1.6v-2.35m.7-3.05q0 .3-.2.5t-.5.2a.68.68 0 0 1-.5-.2q-.2-.2-.2-.5c0-.3.067-.367.2-.5q.2-.2.5-.2c.3 0 .367.067.5.2q.2.2.2.5m-2.55 11.5q.5-.9.35-1.55-.15-.7-1-1.3-2.15-1.25-4.1-1.45-2.55-.3-3 1.25-.55 1.8.2 3.15.7 1.25 2.15 1.8 1.45.5 2.95.05 1.55-.5 2.45-1.95m.6 3.2q.65-.55 1.2-.55c.55 0 .767.183 1.2.55q1.1.9.85 2.35-.15.75-.75.9-.7.1-1-.3h-.6q-.3.4-1 .3-.6-.15-.75-.9-.25-1.45.85-2.35"
+                      />
+                    </svg>
                   </button>
                 </div>
               )}

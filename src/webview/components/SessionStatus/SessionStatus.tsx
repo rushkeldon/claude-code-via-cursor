@@ -19,6 +19,16 @@ type ActivityKind = 'thinking' | 'text' | 'tool' | 'compacting';
 const procConnected = signal(false);
 // auth handshake failed — sticky until a fresh turn/ready clears it
 const authFailed = signal(false);
+// The CLI is retrying a failed request (3+ consecutive api_retry events). Shows
+// a soft "Claude is retrying…" status until substantive progress clears it.
+const retrying = signal(false);
+
+// Honest elapsed indicator: the turn has been silent (no message_start) past a
+// threshold. We make NO wedged-vs-slow claim (undecidable) — just stop going silent
+// like the terminal's spinner. 'soft' (~20s) = "still working"; 'firm' (~60s) =
+// "taking a while". Cleared by the same recovery events as `retrying`. See
+// doc/archive/wedged_turn_elapsed_indicator.plan.md.
+const waiting = signal<'soft' | 'firm' | null>(null);
 // latest turn-activity state + what kind of heartbeat is flowing
 const turn = signal<TurnState>('idle');
 const turnKind = signal<ActivityKind | undefined>(undefined);
@@ -55,6 +65,8 @@ on('setProcessing' as any, (msg: any) => {
     startElapsedTimer();
   } else {
     stopElapsedTimer();
+    retrying.value = false;
+    waiting.value = null;
     // Turn bracket closed — fall back to idle. A trailing turnActivity 'done'
     // arrives just before this and also resolves to ready, so they agree.
     // EXCEPTION: don't clobber an 'errored' turn — the host fires turnActivity
@@ -80,16 +92,36 @@ on('turnActivity' as any, (msg: any) => {
   procConnected.value = true;
   if (state === 'opening' || state === 'active') {
     authFailed.value = false;
+    retrying.value = false;
+    waiting.value = null;
   }
 });
 
 on('ready', () => {
   procConnected.value = true;
   authFailed.value = false;
+  retrying.value = false;
+  waiting.value = null;
 });
 
 on('apiError' as any, () => {
   authFailed.value = true;
+  retrying.value = false;
+  waiting.value = null;
+});
+
+// Escalating elapsed indicator from the host's wait timers. 'firm' never downgrades
+// to 'soft' (the firm timer fires after the soft one); any real progress clears it
+// via the recovery handlers above.
+on('turnWaiting' as any, (msg: any) => {
+  const stage = msg.data?.stage as 'soft' | 'firm' | undefined;
+  if (stage === 'firm' || (stage === 'soft' && waiting.value !== 'firm')) {
+    waiting.value = stage!;
+  }
+});
+
+on('retrying' as any, () => {
+  retrying.value = true;
 });
 
 // Skull (hard kill) parks the session — the process is gone until the next turn
@@ -143,6 +175,20 @@ const displayText = computed(() => {
   if (state === 'error') {
     // An auth handshake failure is distinct from a turn that errored out.
     return authFailed.value ? 'Authentication Error' : 'Turn ended with an error';
+  }
+
+  // Honest elapsed indicator — symptom only, no wedged-vs-slow claim. Sits above
+  // retrying so a stalled connect window reads clearly. Firm wording nudges toward
+  // the (always-available) skull, without claiming the turn is dead.
+  if (waiting.value === 'firm') {
+    return `Taking longer than usual — you can keep waiting${elapsedStr}`;
+  }
+  if (waiting.value === 'soft') {
+    return `Still working…${elapsedStr}`;
+  }
+
+  if (retrying.value) {
+    return `Claude is retrying…${elapsedStr}`;
   }
 
   if (state === 'opening') {

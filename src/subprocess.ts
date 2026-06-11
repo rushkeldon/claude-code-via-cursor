@@ -6,7 +6,6 @@ import { log } from './logger';
 import * as tokenCounters from './tokenCounters';
 import * as conversation from './conversation';
 import * as permissions from './permissions';
-import * as backupRepo from './backupRepo';
 import * as settings from './settings';
 import * as terminalCommands from './terminalCommands';
 import * as modes from './modes';
@@ -91,13 +90,31 @@ let errorOutput = '';
 let lastProcessCumulativeCost = 0;
 // Latches once a provider API error is detected on the live process, so the
 // close handler parks the session instead of chain-spawning, and so we fire the
-// apiError card only once per process. Cleared by respawnAndResend().
+// apiError card only once per process. Cleared by respawn().
 let apiErrorFired = false;
-// The turn currently being executed (set in runTurn). Captured into
-// lastFailedTurn when an API error fires, so Respawn can re-send exactly the
-// turn that failed.
+// Counts CONSECUTIVE api_retry stream events within the current turn. Reset to
+// 0 on substantive progress (message_start / content_block_start), turn end,
+// and respawn. Used to surface a soft "Claude is retrying…" notice once the
+// CLI has clearly stalled (3+ back-to-back retries) instead of waiting out the
+// CLI's full ~191s exponential-backoff retry ladder for the user to learn the
+// turn is wedged. See doc/archive/network_auth_error_handling.plan.md.
+let consecutiveApiRetries = 0;
+
+// Honest elapsed indicator (doc/archive/wedged_turn_elapsed_indicator.plan.md). If a
+// turn opens and no `message_start` arrives, we do NOT try to diagnose wedged-vs-slow
+// (proven undecidable — see doc/ref/claude_cli_tty_vs_piped_auth_timing.md). Instead we
+// just stop going silent, like the terminal's spinner: two escalating, non-destructive
+// notices keyed off elapsed silence. SOFT ("still working") past the typical first-token
+// window; FIRM ("taking a while") past the healthy-slow tail (p99 ~20s, max ~45s) but
+// at/under the terminal's ~80s so we never feel slower than it. The timer only TRIGGERS
+// information — it never kills or judges. Both disarm the moment message_start arrives.
+const WAIT_SOFT_MS = 20_000;
+const WAIT_FIRM_MS = 60_000;
+let sawMessageStart = false;
+let waitSoftTimer: NodeJS.Timeout | undefined;
+let waitFirmTimer: NodeJS.Timeout | undefined;
+// The turn currently being executed (set in runTurn).
 let currentTurn: Turn | undefined;
-let lastFailedTurn: Turn | undefined;
 
 // ── Outbound control protocol ─────────────────────────────────────────────
 // We send control_requests (initialize, set_model, interrupt, …) to the live
@@ -131,6 +148,12 @@ const AUTH_PATTERNS: RegExp[] = [
 	/invalid (api )?key/i,
 	/oauth.*(expired|invalid|failed|revoked)/i,
 	/\b401\b/,
+	// Missing/unresolvable credentials surface NOT as an HTTP 401/403 but as the
+	// AWS SDK credential-provider-chain failure, arrived as plain assistant text /
+	// result (no api_retry, no HTTP code) — see doc/archive/wedged_vs_slow_experiment.plan.md
+	// Cell 4. Treat it as an auth error so the friendly auth card shows instead of
+	// the raw "API Error: Could not load credentials…" text.
+	/could not load credentials from any providers/i,
 ];
 
 // ── Provider API-error classification ──────────────────────────────────────
@@ -165,6 +188,21 @@ export function classifyApiError(text: string): ApiErrorClassification {
 	if (!m) { return { isError: false }; }
 	const code = parseInt(m[1], 10);
 	return { isError: true, code, category: categoryForCode(code) };
+}
+
+// Classify, checking an explicit HTTP code FIRST, then falling back to the
+// code-less AUTH_PATTERNS (e.g. "Could not load credentials from any providers",
+// "Not logged in"). Single source of truth for "is this an auth/provider error?"
+// across all ingresses (assistant text, result, stderr). Keeps the dominant-
+// content guard at the call sites — this only decides classification, not whether
+// the surrounding text is error-shaped enough to act on.
+function classifyApiOrAuthError(text: string): ApiErrorClassification {
+	const byCode = classifyApiError(text);
+	if (byCode.isError) { return byCode; }
+	if (text && AUTH_PATTERNS.some(p => p.test(text))) {
+		return { isError: true, category: 'auth' };
+	}
+	return { isError: false };
 }
 
 export function init(d: SubprocessDeps): void {
@@ -309,6 +347,30 @@ export function sendControlRequest(subtype: string, payload: Record<string, any>
 	});
 }
 
+// Elapsed-indicator timers: arm/disarm (doc/archive/wedged_turn_elapsed_indicator.plan.md).
+// Arm both at turn open; disarm both on the first message_start and at turn end/reset.
+// Each fires a non-destructive `turnWaiting` notice if its threshold elapses with still
+// no message_start — informational only, no kill, no verdict.
+function armWaitTimers(): void {
+	clearWaitTimers();
+	sawMessageStart = false;
+	waitSoftTimer = setTimeout(() => {
+		waitSoftTimer = undefined;
+		if (sawMessageStart || apiErrorFired) { return; }
+		deps?.postMessage({ type: 'turnWaiting', data: { stage: 'soft' } });
+	}, WAIT_SOFT_MS);
+	waitFirmTimer = setTimeout(() => {
+		waitFirmTimer = undefined;
+		if (sawMessageStart || apiErrorFired) { return; }
+		deps?.postMessage({ type: 'turnWaiting', data: { stage: 'firm' } });
+	}, WAIT_FIRM_MS);
+}
+
+function clearWaitTimers(): void {
+	if (waitSoftTimer) { clearTimeout(waitSoftTimer); waitSoftTimer = undefined; }
+	if (waitFirmTimer) { clearTimeout(waitFirmTimer); waitFirmTimer = undefined; }
+}
+
 // Route an inbound control_response to its pending sender. The CLI wraps the
 // payload as { response: { subtype: 'success'|'error', request_id, response?, error? } }.
 function handleControlResponse(jsonData: any): void {
@@ -403,13 +465,6 @@ async function runTurn(turn: Turn): Promise<void> {
 		data: { isProcessing: true }
 	});
 
-	try {
-		await backupRepo.createBackupCommit(message);
-	}
-	catch (e: any) {
-		log.error('Subprocess', 'backupRepo.createBackupCommit failed', { error: e?.message ?? String(e) }, '💥');
-	}
-
 	deps.postMessage({
 		type: 'loading',
 		data: 'Claude is working...'
@@ -467,6 +522,7 @@ async function runTurn(turn: Turn): Promise<void> {
 	// (user message written, no stream event yet). The monitor owns the
 	// awaiting-tool state internally.
 	turnHealth.beginTurn();
+	armWaitTimers(); // start the elapsed-indicator timers for this turn
 }
 
 // Spawn one long-lived `claude` for this session and wire its handlers. Returns
@@ -612,6 +668,8 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 	rawOutput = '';
 	errorOutput = '';
 	apiErrorFired = false;
+	consecutiveApiRetries = 0;
+	clearWaitTimers(); // fresh process — disarm any pending elapsed-indicator timers
 	// Fresh process → its total_cost_usd restarts at ~0, so the cost-delta
 	// baseline must restart too (else the first result computes a bogus delta
 	// against the prior process's final cumulative).
@@ -1126,6 +1184,8 @@ function onTurnEnd(): void {
 	// A turn completed normally, so any pending pause flag is stale (the abort
 	// path didn't claim it). Clear it so it can't downgrade a genuine abort later.
 	userPausedSession = null;
+	consecutiveApiRetries = 0;
+	clearWaitTimers(); // turn ended — disarm any pending elapsed-indicator timers
 
 	isProcessing = false;
 	// Turn genuinely ended → close the turn-health monitor (→ done/idle). Also
@@ -1140,6 +1200,11 @@ function onTurnEnd(): void {
 	// by the guard above, so it never drains the queue or applies a deferred
 	// switch.
 	maybeGenerateTitle();
+
+	// Cold-cache mode discovery: if we still don't know where active_modes.md is
+	// (no /modes command has run this workspace, nothing cached), fire one silent
+	// query to learn the path so the mode pill can reflect real state. Once only.
+	maybeDiscoverModePath();
 
 	// A model switch requested mid-turn applies now (before the next turn). Do
 	// this before a settings restart: if both are pending, the restart respawns
@@ -1207,6 +1272,32 @@ function maybeGenerateTitle(): void {
 	});
 }
 
+// One-shot-per-session guard for cold-cache mode discovery (module scope so it
+// persists across onTurnEnd calls).
+let modeDiscoveryAttempted = false;
+
+// Cold-cache mode discovery. If modes.ts already knows the active_modes.md path
+// (cached from a prior session, or sniffed from a /modes tool call this session),
+// there's nothing to do. Otherwise fire ONE silent query asking for the path; the
+// answer is parsed by modes.noteDiscoveredPathFromAnswer, which caches + watches +
+// pushes the real mode. Uses sendSilentQuery, so its result is caught by
+// onTurnEnd's guard and never drains the queue.
+function maybeDiscoverModePath(): void {
+	if (modeDiscoveryAttempted) { return; }
+	if (modes.isPathKnown()) { return; }
+	// Don't issue a second silent query while one is already outstanding (single
+	// callback slot) — e.g. the title query just took it. Retry next boundary.
+	if (silentQueryCallback !== null) { return; }
+	// Only latch the one-shot if there's a live process to actually ask; otherwise
+	// sendSilentQuery would no-op (callback '') and we'd burn the attempt for good.
+	if (!currentClaudeProcess?.stdin) { return; }
+	modeDiscoveryAttempted = true;
+	log.info('Subprocess', 'maybeDiscoverModePath: firing silent path-discovery query', undefined, '🔎');
+	sendSilentQuery(modes.MODE_DISCOVERY_PROMPT, (answer) => {
+		modes.noteDiscoveredPathFromAnswer(answer);
+	});
+}
+
 // ── Settings/profile restart ──────────────────────────────────────────────
 // The provider/account/region come from settings.json's env block, read at
 // process startup — so a profile swap needs a process restart (model-within-
@@ -1263,6 +1354,8 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 			// look "silent" to the wall-clock watchdog.
 			if (ev.type === 'message_start') {
 				turnHealth.signal('message_start');
+				consecutiveApiRetries = 0;
+				sawMessageStart = true; clearWaitTimers(); // turn is streaming — disarm timers
 			} else if (ev.type === 'content_block_start' && ev.content_block) {
 				const blockType = ev.content_block.type;
 				log.debug('StreamParser', 'content_block_start', { blockType, index: ev.index }, '🧱');
@@ -1349,6 +1442,23 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 						preTokens: jsonData.compact_metadata?.pre_tokens
 					}
 				});
+			} else if (jsonData.subtype === 'api_retry') {
+				consecutiveApiRetries++;
+				const status = jsonData.error_status as number | null;
+				log.debug('StreamParser', 'api_retry',
+					{ errorStatus: status, consecutive: consecutiveApiRetries }, '🔁');
+
+				if (status === 401 || status === 403) {
+					fireApiError(
+						{ isError: true, code: status, category: 'auth' },
+						`API retry reported auth error ${status}`,
+					);
+					break;
+				}
+
+				if (consecutiveApiRetries === 3) {
+					deps.postMessage({ type: 'retrying', data: {} });
+				}
 			}
 			break;
 
@@ -1391,11 +1501,13 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 						}
 						// Ingress A — the channel that leaked the 403: a provider error
 						// can arrive as a plain assistant text block on stdout. Classify
-						// before emitting. Guard with dominant-content (short turn, no
-						// tool_use) so the assistant *discussing* an error in a long
-						// answer is never mistaken for a real failure (see plan §2).
+						// before emitting (HTTP code OR code-less auth phrase, e.g. the
+						// AWS "Could not load credentials from any providers" string).
+						// Guard with dominant-content (short turn, no tool_use) so the
+						// assistant *discussing* an error in a long answer is never
+						// mistaken for a real failure (see plan §2).
 						const text = content.text.trim();
-						const cls = classifyApiError(text);
+						const cls = classifyApiOrAuthError(text);
 						const turnHadToolUse = jsonData.message.content.some((c: any) => c.type === 'tool_use');
 						if (cls.isError && !turnHadToolUse && text.length <= 600) {
 							fireApiError(cls, text);
@@ -1570,21 +1682,14 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 
 			// Ingress B — provider error carried in the result string (covers
 			// error_during_execution and is_error successes, any subtype). Classify
-			// by HTTP code first…
+			// by HTTP code first, then code-less AUTH_PATTERNS (single source of
+			// truth — replaces the old hardcoded includes() list). NOT gated on
+			// is_error: the missing-credentials failure ("Could not load credentials
+			// from any providers") arrives as a SUCCESS-subtype result, so gating on
+			// is_error would miss it (see wedged_vs_slow_experiment Cell 4).
 			const resultText = typeof jsonData.result === 'string' ? jsonData.result : '';
-			const cls = classifyApiError(resultText);
+			const cls = classifyApiOrAuthError(resultText);
 			if (cls.isError) { fireApiError(cls, resultText); return; }
-			// …then the legacy login-string fallback for code-less auth phrases
-			// ("Not logged in", "/login", …), classified as auth.
-			if (jsonData.is_error && resultText && (
-				resultText.includes('Invalid API key') ||
-				resultText.includes('Not logged in') ||
-				resultText.includes('/login') ||
-				resultText.includes('not authenticated')
-			)) {
-				fireApiError({ isError: true, category: 'auth' }, resultText);
-				return;
-			}
 
 			if (jsonData.subtype === 'success') {
 				if (jsonData.session_id) {
@@ -1668,10 +1773,10 @@ async function processJsonStreamData(jsonData: any): Promise<void> {
 }
 
 // Single sink for any detected provider API error, from any ingress path
-// (assistant text, result, stderr). Latches once per process, captures the
-// in-flight turn so Respawn can re-send it, posts the categorized apiError card
-// message, and kills the live process. The close handler's apiErrorFired branch
-// then parks the session (no chain-spawn). Replaces the old fireAuthError.
+// (assistant text, result, stderr). Latches once per process, posts the
+// categorized apiError card message, and kills the live process. The close
+// handler's apiErrorFired branch then parks the session (no chain-spawn).
+// Replaces the old fireAuthError.
 function fireApiError(cls: ApiErrorClassification, rawSnippet: string): void {
 	if (apiErrorFired) { return; }
 	if (!deps) { return; }
@@ -1681,8 +1786,6 @@ function fireApiError(cls: ApiErrorClassification, rawSnippet: string): void {
 		code: cls.code,
 		rawSnippet: rawSnippet.trim().slice(0, 200)
 	}, '🔐');
-	// Capture what to re-send on Respawn (the turn that was mid-flight).
-	lastFailedTurn = currentTurn;
 	deps.postMessage({
 		type: 'apiError',
 		data: {
@@ -1768,21 +1871,19 @@ export async function killProcess(): Promise<void> {
 	}
 }
 
-// RESPAWN recovery (the composer's "Respawn" button after a provider API error).
-// Provider-agnostic: a fresh `claude` child re-reads whatever auth applies
+// RESPAWN recovery (the auth-error card's "Respawn" button after a provider API
+// error). Provider-agnostic: a fresh `claude` child re-reads whatever auth applies
 // (Bedrock creds, Anthropic OAuth token, …) at spawn time — we never inspect
-// credentials ourselves. Clears the api-error latch, reaps any parked process,
-// then re-sends the exact turn that failed (captured in lastFailedTurn).
-export async function respawnAndResend(): Promise<void> {
+// credentials ourselves. Clears the api-error latch and reaps the parked process;
+// the next spawn happens lazily on the user's next turn. It deliberately does NOT
+// resend the failed turn — replaying the last prompt reads as the user repeating
+// themselves and may re-run work they don't want repeated; they re-send if/when they
+// choose. (Named plainly: it respawns, nothing more.)
+export async function respawn(): Promise<void> {
 	if (!deps) { return; }
-	const turn = lastFailedTurn;
-	log.info('ClaudeProcess', 'respawnAndResend', { hasTurn: !!turn }, '♻️');
+	log.info('ClaudeProcess', 'respawn (kill + clear latch; no auto-resend)', undefined, '♻️');
 	apiErrorFired = false;
-	lastFailedTurn = undefined;
 	await killProcess();
-	if (turn) {
-		await sendMessage(turn.message, turn.planMode, turn.images);
-	}
 }
 
 // STOP (graceful): interrupt the in-flight turn but keep the process WARM so the

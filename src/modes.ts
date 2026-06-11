@@ -47,10 +47,56 @@ export function init(deps: {
 	}
 }
 
+// Re-push the current mode to the webview. Called on `webviewReady`: the startup
+// read in init() fires during activate(), BEFORE the webview has mounted its
+// message listeners, so that push is lost. The webview re-requests state on
+// mount via this. Falls back to the default ('agent') push if no path is known
+// yet, so the pill is at least explicitly set rather than relying on its initial
+// signal value.
+export function resync(): void {
+	if (activeModesPath) {
+		readAndPushActiveMode(activeModesPath);
+	} else {
+		log.debug('Modes', 'resync: no path known yet, pushing default', undefined, '📤');
+		postMessage?.({ type: 'setActiveMode', data: { mode: 'agent' } });
+	}
+}
+
 // Derive the pill mode from active_modes.md contents. 'plan' iff a top-level
 // `- plan` entry exists (with or without a `: dir` param); otherwise 'agent'.
 export function pillModeFromFile(text: string): 'agent' | 'plan' {
 	return /^\s*-\s*plan\b/m.test(text) ? 'plan' : 'agent';
+}
+
+// True once we know where active_modes.md lives (cached from a prior session or
+// discovered this session). Used to gate the one-shot silent discovery query.
+export function isPathKnown(): boolean {
+	return !!activeModesPath;
+}
+
+// Silent discovery query, fired once per session at an idle boundary when the
+// path is still unknown (cold cache — no /modes command has run). We ask for the
+// PATH rather than "what modes are active", because active_modes.md is already in
+// the model's context (via MEMORY.md), so it would answer the latter WITHOUT a
+// Read tool call — leaving nothing for the stream sniff to catch. Asking for the
+// path is answered from the system prompt's auto-memory section directly.
+export const MODE_DISCOVERY_PROMPT =
+	'Quick internal question, not shown to the user and unrelated to the task: ' +
+	'what is the absolute filesystem path to your active_modes.md auto-memory ' +
+	'file? Reply with only the path — no prose, no quotes, no backticks.';
+
+// Parse the discovery answer for an active_modes.md path and adopt it (cache +
+// watch + push the real mode). Best-effort: a junk/empty answer is ignored by the
+// suffix guard in notePathFromStream, so the pill simply stays at its default.
+export function noteDiscoveredPathFromAnswer(answer: string): void {
+	if (!answer) { return; }
+	const m = answer.match(/(\/[^\s'"`]*active_modes\.md)/);
+	if (m) {
+		log.info('Modes', 'discovered active_modes.md path from silent query', { path: m[1] }, '🔎');
+		notePathFromStream(m[1]);
+	} else {
+		log.debug('Modes', 'discovery answer had no usable path', { answer }, '🤔');
+	}
 }
 
 // Called by the subprocess stream parser whenever a tool call touches a file

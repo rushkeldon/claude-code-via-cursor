@@ -1,8 +1,8 @@
 {
   "name": "claude-code-via-cursor",
   "displayName": "Claude Code via Cursor",
-  "description": "Personal fork of Claude Code Chat with the OpenCredits integration removed. Routes only to your local Claude Code.",
-  "version": "3.0.0-appcloud9.154",
+  "description": "A Cursor / VS Code extension that wraps the Claude Code CLI in a rich, editor-native chat interface — think Claude Desktop, but integrated with Cursor.",
+  "version": "3.0.0-appcloud9.184",
   "publisher": "appcloud9",
   "author": "Keldon Rush (appcloud9.com)",
   "repository": {
@@ -196,7 +196,7 @@
         "ccvc.environment.variables": {
           "type": "object",
           "default": {},
-          "description": "Custom environment variables to pass to Claude Code. Example: {\"ANTHROPIC_API_KEY\": \"sk-...\"}"
+          "description": "Custom environment variables to pass to Claude Code. Example: {\"ANTHROPIC_API_KEY\": \"sk-...\"}. To fail faster when a turn is stuck on slow credential/connection resolution, you can set CLAUDE_CODE_MAX_RETRIES (default 10 — lower it, e.g. \"2\", to give up sooner) and/or API_TIMEOUT_MS (default 600000 — the per-request ceiling). These trade resilience on flaky networks for a faster failure, so leave them unset unless you want that."
         },
         "ccvc.environment.disabled": {
           "type": "boolean",
@@ -228,32 +228,20 @@
           "default": "#00ff41",
           "description": "Font color for the prompt in terminal mode."
         },
-        "ccvc.modes.items": {
-          "type": "array",
-          "default": [
-            { "id": "agent", "label": "Agent", "command": "/modes agent" },
-            { "id": "plan", "label": "Plan", "command": "/modes plan ./doc" }
-          ],
-          "description": "Items shown in the prompt mode picker. Each item sends its `command` as an explicit message when clicked. Built-in ids 'agent' and 'plan' get matching icons; other ids get a generic icon.",
-          "items": {
-            "type": "object",
-            "required": ["id", "label", "command"],
-            "properties": {
-              "id": { "type": "string", "description": "Stable id; 'agent'/'plan' drive the status pill and get built-in icons." },
-              "label": { "type": "string", "description": "Text shown in the menu and (for the active mode) on the pill." },
-              "command": { "type": "string", "description": "The message sent when this item is clicked, e.g. '/modes plan ./doc'." }
-            }
-          }
+        "ccvc.modes.planCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Command sent when the Plan mode pill is clicked. Leave empty to use the built-in default (`/modes plan ./doc`). Sent verbatim to Claude, so you can point it at any slash command or mode directive."
+        },
+        "ccvc.modes.agentCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Command sent when the Agent mode pill is clicked. Leave empty to use the built-in default (`/modes agent`). Sent verbatim to Claude, so you can point it at any slash command or mode directive."
         },
         "ccvc.firstRun.hasShown": {
           "type": "boolean",
           "default": false,
           "description": "Whether the first-run experience has been shown. Uncheck to see it again on next launch."
-        },
-        "ccvc.migratedFromClaudeCodeChat": {
-          "type": "boolean",
-          "default": false,
-          "description": "Internal: set once the one-time migration of legacy claudeCodeChat.* settings to ccvc.* has run. Not meant to be edited manually."
         }
       }
     }

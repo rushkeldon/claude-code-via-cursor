@@ -20,51 +20,6 @@ let selectedModel = 'default';
 let effort: string | undefined;   // undefined = inherit the model's default effort
 let thoughtsOn = true;            // true = display 'summarized', false = 'omitted'
 
-// Config keys that existed under the legacy `claudeCodeChat.*` namespace before
-// the rename to `ccvc.*`. The suffixes are unchanged — only the root moved.
-const LEGACY_CONFIG_KEYS = [
-	'wsl.enabled', 'wsl.distro', 'wsl.nodePath', 'wsl.claudePath',
-	'thinking.show', 'thinking.effort', 'permissions.yoloMode', 'executable.path',
-	'environment.variables', 'environment.disabled',
-	'terminal.useIntegrated', 'terminal.externalApp', 'terminal.customTemplate',
-	'terminal.borderColor', 'terminal.fontColor', 'firstRun.hasShown',
-];
-
-// One-time migration: a namespace rename would otherwise silently orphan the
-// user's saved values (VS Code would find nothing under `ccvc.*` and fall back
-// to declared defaults). This copies any legacy `claudeCodeChat.<key>` value to
-// `ccvc.<key>` when the new key is unset, preserving the original scope
-// (workspace vs global). Copy-only — the old keys are left in place (harmless)
-// so the change stays reversible. Idempotent: gated by a sentinel and a per-key
-// "new value already set" guard, so it never clobbers a choice made under ccvc.
-export async function migrateLegacyConfig(): Promise<void> {
-	const oldCfg = vscode.workspace.getConfiguration('claudeCodeChat');
-	const newCfg = vscode.workspace.getConfiguration('ccvc');
-	if (newCfg.get<boolean>('migratedFromClaudeCodeChat')) {
-		return;
-	}
-	let migrated = 0;
-	for (const key of LEGACY_CONFIG_KEYS) {
-		const inspected = oldCfg.inspect(key);
-		const oldVal = inspected?.workspaceValue ?? inspected?.globalValue;
-		const newInspected = newCfg.inspect(key);
-		const newAlreadySet = newInspected?.workspaceValue !== undefined || newInspected?.globalValue !== undefined;
-		if (oldVal !== undefined && !newAlreadySet) {
-			const target = inspected?.workspaceValue !== undefined
-				? vscode.ConfigurationTarget.Workspace
-				: vscode.ConfigurationTarget.Global;
-			try {
-				await newCfg.update(key, oldVal, target);
-				migrated++;
-			} catch (e) {
-				log.warn('Settings', 'migrateLegacyConfig: copy failed', { key, error: (e as any)?.message ?? String(e) }, '⚠️');
-			}
-		}
-	}
-	await newCfg.update('migratedFromClaudeCodeChat', true, vscode.ConfigurationTarget.Global);
-	log.info('Settings', 'migrateLegacyConfig done', { migrated }, '🔄');
-}
-
 export function init(d: SettingsDeps): void {
 	log.info('Settings', 'init', { hasPostMessage: !!d.postMessage }, '🔧');
 	deps = d;
@@ -255,12 +210,20 @@ export function getFullModelString(): { configured?: string; resolvedEnv?: strin
 	}
 }
 
-// Fallback for the mode picker when the user hasn't customized `ccvc.modes.items`
-// (kept in sync with the package.json default). Mirrors the package.json shape.
-const DEFAULT_MODE_ITEMS = [
-	{ id: 'agent', label: 'Agent', command: '/modes agent' },
-	{ id: 'plan', label: 'Plan', command: '/modes plan ./doc' },
-];
+// The mode picker is exactly two pills — Plan and Agent — each a blind passthrough
+// of a command string to Claude. The user can override each command via
+// `ccvc.modes.{plan,agent}Command`; an empty/whitespace value falls back to the
+// built-in default below (so the placeholder text in the settings UI *is* the
+// default). These defaults are the source of truth, mirrored by the package.json
+// `default: ""` (empty → use these).
+const DEFAULT_PLAN_COMMAND = '/modes plan ./doc';
+const DEFAULT_AGENT_COMMAND = '/modes agent';
+
+// Resolve a configured command override: truthy (non-blank) → use it verbatim;
+// empty/whitespace/non-string → fall back to the built-in default.
+function resolveModeCommand(raw: unknown, fallback: string): string {
+	return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : fallback;
+}
 
 export function sendCurrentSettings(): void {
 	log.debug('Settings', 'enter sendCurrentSettings', undefined, '➡️');
@@ -277,7 +240,15 @@ export function sendCurrentSettings(): void {
 		'terminal.useIntegrated': config.get<boolean>('terminal.useIntegrated', true),
 		'terminal.externalApp': config.get<string>('terminal.externalApp', ''),
 		'terminal.customTemplate': config.get<string>('terminal.customTemplate', ''),
-		'modes.items': config.get<Array<{ id: string; label: string; command: string }>>('modes.items', DEFAULT_MODE_ITEMS)
+		// Raw overrides, for the Settings dialog fields (empty = "use default").
+		'modes.planCommand': config.get<string>('modes.planCommand', ''),
+		'modes.agentCommand': config.get<string>('modes.agentCommand', ''),
+		// Resolved two-item picker list (override-or-default), for the prompt-pane
+		// pill. Built host-side so the webview picker stays a dumb renderer.
+		'modes.items': [
+			{ id: 'agent', label: 'Agent', command: resolveModeCommand(config.get('modes.agentCommand'), DEFAULT_AGENT_COMMAND) },
+			{ id: 'plan', label: 'Plan', command: resolveModeCommand(config.get('modes.planCommand'), DEFAULT_PLAN_COMMAND) },
+		]
 	};
 
 	deps?.postMessage({

@@ -4,24 +4,20 @@ import { useState } from 'preact/hooks';
 interface ThinkingPillProps {
   content: string;
   elapsedLabel: string;
-  noThoughts?: boolean;
 }
 
-export function ThinkingPill({ content, elapsedLabel, noThoughts }: ThinkingPillProps) {
+export function ThinkingPill({ content, elapsedLabel }: ThinkingPillProps) {
   const [expanded, setExpanded] = useState(false);
   const hasContent = !!content && !!content.trim();
 
   // Timer-only pill: a thinking block occurred but produced no thought text. Not
-  // expandable; shows an honest note so an empty Thoughts toggle reads as
-  // informative rather than broken.
+  // expandable, and shows no note — the absence of an expand chevron already
+  // tells the user there's nothing to see, so a "no thoughts" line is just noise.
   if (!hasContent) {
     return (
       <div class="thinking-pill thinking-pill--empty">
         <span class="thinking-pill-icon">💭</span>
         <span class="thinking-pill-label">Thought for {elapsedLabel}</span>
-        {noThoughts && (
-          <span class="thinking-pill-note">· no thoughts returned for this model/provider</span>
-        )}
       </div>
     );
   }

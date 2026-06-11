@@ -49,6 +49,8 @@ export type MessageFromExtension =
   | { type: 'conversationList'; data: any[] }
   | { type: 'imageAttached'; filePath: string; thumbnailUri: string }
   | { type: 'apiError'; data: { category: 'auth' | 'rate-limit' | 'bad-request' | 'server' | 'client'; code?: number; detail?: string } }
+  | { type: 'retrying'; data: {} }
+  | { type: 'turnWaiting'; data: { stage: 'soft' | 'firm' } }
   | { type: 'turnActivity'; data: { state: 'opening' | 'active' | 'quiet' | 'done' | 'errored'; kind?: 'thinking' | 'text' | 'tool' | 'compacting' } }
   | { type: 'modelConfig'; data: { model?: string; globalDefault?: string; needsFirstRun: boolean } }
   | { type: 'modelList'; data: { models: Array<{ value: string; displayName?: string; description?: string; supportedEffortLevels?: string[]; supportsAdaptiveThinking?: boolean; supportsEffort?: boolean }>; selected?: string } }

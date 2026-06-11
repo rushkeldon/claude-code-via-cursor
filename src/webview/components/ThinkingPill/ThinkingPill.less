@@ -1,6 +1,10 @@
 .thinking-pill {
-  // Tight vertical rhythm so the collapsed pill is as short as a READ tool row.
-  margin: 2px 0;
+  // Vertical rhythm: snug up against the Claude card above (the preceding
+  // .message drops its bottom margin to ~2px via :has(+ .thinking-pill) in
+  // ChatMessage.less, so the pill reads as attached to that turn) and leave a
+  // bit of air below — ~3/4 of the card's normal 10px gap — before the next
+  // card, so the thought clearly belongs to Claude, not to what follows.
+  margin: 2px 0 7px 0;
 
   &-summary {
     all: unset;

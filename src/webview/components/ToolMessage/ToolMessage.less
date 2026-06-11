@@ -8,6 +8,15 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+// Collapsed (a non-inline tool whose body is folded away): drop the divider
+// (margin + border) so the lone header row matches the height of a collapsed
+// READ tool card — one compact line. The divider only earns its keep when the
+// body is showing below it.
+.tool-header--collapsed {
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
 // Single-line variant: the file path rides inline (right-aligned, start-truncated),
 // so there's no body row and no divider — the whole tool call is one line tall.
 .tool-header--inline {
@@ -98,6 +107,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   direction: rtl;
+  font-size: 12px;
+  font-family: var(--vscode-editor-font-family);
+}
+
+// Inline WebFetch URL in the header: right-aligned, take the remaining width, and
+// end-truncate (ellipsis on the RIGHT). Unlike a file path — where the filename at
+// the end matters most, so we left-truncate via rtl — a URL's scheme+domain at the
+// START is the identifying part, so we keep normal LTR flow and let the tail clip.
+.tool-url-link--inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
   font-size: 12px;
   font-family: var(--vscode-editor-font-family);
 }

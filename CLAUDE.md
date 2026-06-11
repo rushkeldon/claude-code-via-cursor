@@ -90,6 +90,14 @@ When a plan is sent to Cursor via the `plan2cursor` skill, the file is copied in
 
    Edit surgically: locate the todo by its stable UUID `id`, change only the `status:` line beneath it, leave every other byte untouched. Never re-emit the frontmatter, re-order todos, or regenerate UUIDs — Cursor's renderer is picky and a reformatted block drops the plan view back to plain markdown. The status keyword is **`in_progress` with an underscore** (`in-progress` with a hyphen silently fails to render).
 
+### `build2plan [path to plan.md]` (mini-skill)
+
+Take a finished plan file from the repo all the way through execution, in one command. Given a `*.plan.md` path:
+
+1. **`plan2cursor [path]`** — copy the plan into `~/.cursor/plans/` so Cursor's plans panel renders it live (invoke the `plan2cursor` skill).
+2. **Archive the original** — move the repo copy into `doc/archive/`. The live copy is now the one in `~/.cursor/plans/`; edit *that* during execution, never the repo copy (per the "Archive the original" rule above).
+3. **Implement to the plan, keeping the TODOs updated** — execute the plan against the live `~/.cursor/plans/*.plan.md`, flipping each todo's `status` `pending → in_progress → completed` immediately and never batched (per the "Keep the todos accurate at every step" rule above — surgical `status:`-line edits only).
+
 ## Reference project
 
 `../claude-code-chat` is the monolithic HTML predecessor. Use it as reference when porting features — the extension host code is largely shared, but the old webview was a single HTML blob with inline scripts.

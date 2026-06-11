@@ -54,7 +54,7 @@ export function ChatMessage({
   const contentDisplayed = canCollapse ? displayed : true;
 
   return (
-    <div class={`message ${type}${accent ? ` cat-${accent}` : ''}`} ref={(el) => { messageRef = el; }}>
+    <div class={`message ${type}${accent ? ` cat-${accent}` : ''}${canCollapse && !contentDisplayed ? ' collapsed' : ''}`} ref={(el) => { messageRef = el; }}>
       {hasHeader && (
         <div
           class={`message-header${canCollapse ? ' message-header--toggle' : ''}`}

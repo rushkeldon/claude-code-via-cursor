@@ -34,10 +34,6 @@ export interface ChatMsg {
   content: string;
   images?: Array<{ filePath: string; previewUri: string }>;
   elapsedLabel?: string;
-  // For 'thinking' pills: a thinking block occurred but returned no thought text
-  // (Thoughts On, provider didn't honor display — e.g. Bedrock-4.8). Renders a
-  // timer-only pill with an honest note instead of an expandable thought.
-  noThoughts?: boolean;
   timestamp?: number;
   questionData?: QuestionData;
   permissionData?: PermissionData;
