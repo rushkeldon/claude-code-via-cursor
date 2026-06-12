@@ -2,11 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import { initLogger, log } from './logger';
-import * as profile from './profile';
 import * as settings from './settings';
 import * as conversation from './conversation';
 import * as permissions from './permissions';
-import * as skillsAndPlugins from './skillsAndPlugins';
 import * as subprocess from './subprocess';
 import * as modes from './modes';
 import * as sessionLock from './sessionLock';
@@ -34,7 +32,6 @@ export function activate(context: vscode.ExtensionContext) {
 		getGlobalStoragePath: () => context.globalStorageUri.fsPath,
 		getPackageVersion: () => context.extension?.packageJSON?.version
 	});
-	profile.init({ postMessage: (msg: any) => webview.postMessage(msg) });
 	settings.init({
 		postMessage: (msg: any) => webview.postMessage(msg),
 		workspaceState: context.workspaceState,
@@ -45,10 +42,6 @@ export function activate(context: vscode.ExtensionContext) {
 		workspaceState: context.workspaceState
 	});
 	conversation.initializeConversations(context.storageUri?.fsPath);
-	skillsAndPlugins.init({
-		postMessage: (msg) => webview.postMessage(msg),
-		storagePath: context.storageUri?.fsPath
-	});
 	permissions.init({
 		postMessage: (msg) => webview.postMessage(msg),
 		writeToStdin: (data) => {
@@ -129,17 +122,14 @@ export function activate(context: vscode.ExtensionContext) {
 	statusBarItem.command = 'claude-code-via-cursor.openChat';
 	statusBarItem.show();
 
-	// Profile + settings watcher. Pushes the identity profile to the UI AND
-	// requests a graceful subprocess restart at the next idle boundary so a
-	// profile/provider swap (env block in settings.json) takes effect — model-
-	// within-provider is handled in-band by set_model, but provider/account/
-	// region are read at process startup and need a respawn.
+	// Settings watcher. Requests a graceful subprocess restart at the next idle
+	// boundary so a profile/provider swap (env block in settings.json) takes
+	// effect — model-within-provider is handled in-band by set_model, but
+	// provider/account/region are read at process startup and need a respawn.
 	const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
 	const onSettingsChange = () => {
-		profile.readAndPushProfile();
 		subprocess.requestSettingsRestart();
 	};
-	profile.readAndPushProfile();
 	const profileWatcher = vscode.workspace.createFileSystemWatcher(
 		new vscode.RelativePattern(vscode.Uri.file(path.dirname(settingsPath)), 'settings.json')
 	);

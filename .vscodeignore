@@ -17,3 +17,13 @@ build
 **/test/**
 vite.config.*
 doc/**
+
+# Dev/IDE cruft — never ship in the VSIX
+.disney_dev_mcp/**
+.idea/**
+.chroma/**
+claude-code-via-cursor.iml
+probe_thinking.mjs
+CLAUDE.md
+package-lock.json
+**/*.vsix

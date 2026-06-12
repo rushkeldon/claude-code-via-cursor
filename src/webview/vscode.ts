@@ -7,7 +7,6 @@ export type MessageToExtension =
   | { type: 'firstRunShown' }
   | { type: 'getDetectedTerminals' }
   | { type: 'newSession' }
-  | { type: 'requestIdentityProfile' }
   | { type: 'requestSettings' }
   | { type: 'copyToClipboard'; text: string }
   | { type: 'getSettings' }
@@ -37,7 +36,6 @@ export type MessageToExtension =
 
 export type MessageFromExtension =
   | { type: 'ready'; data: string }
-  | { type: 'identityProfile'; data: { profile: string | null; healthy: boolean } }
   | { type: 'output'; data: string }
   | { type: 'thinking'; data: string }
   | { type: 'thinkingDelta'; data: string }

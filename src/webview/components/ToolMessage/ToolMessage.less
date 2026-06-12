@@ -111,6 +111,21 @@
   font-family: var(--vscode-editor-font-family);
 }
 
+// The FORKED notice's message: same right-aligned, start-truncated layout as an
+// inline path, but NOT a link — it's a static notice, so no underline, link color,
+// or pointer cursor (which would falsely imply it's clickable).
+.forked-card-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  font-size: 12px;
+  font-family: var(--vscode-editor-font-family);
+  color: var(--vscode-descriptionForeground);
+}
+
 // Inline WebFetch URL in the header: right-aligned, take the remaining width, and
 // end-truncate (ellipsis on the RIGHT). Unlike a file path — where the filename at
 // the end matters most, so we left-truncate via rtl — a URL's scheme+domain at the

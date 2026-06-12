@@ -128,6 +128,26 @@ export function readAndPushActiveMode(p: string): void {
 	postMessage?.({ type: 'setActiveMode', data: { mode } });
 }
 
+// The full active-mode entries (the `- plan: ./doc`, `- sbs`, … lines) from the
+// known active_modes.md, with the leading "- " stripped. Used to build a fork's
+// "lineage card" so a forked session can inherit the parent's modes at birth.
+// Returns [] when the path is unknown, the file is missing/unreadable, or it holds
+// no entries — in which case the fork carries no card (a plain interactive fork).
+export function getActiveModeEntries(): string[] {
+	if (!activeModesPath) { return []; }
+	try {
+		const text = fs.readFileSync(activeModesPath, 'utf8');
+		return text
+			.split('\n')
+			.map(l => l.trim())
+			.filter(l => l.startsWith('- '))
+			.map(l => l.slice(2).trim())
+			.filter(Boolean);
+	} catch {
+		return [];
+	}
+}
+
 // (Re)create the FileSystemWatcher for the given file. Disposes any prior
 // watcher first so we never stack watchers if the path changes.
 function startWatching(p: string): void {

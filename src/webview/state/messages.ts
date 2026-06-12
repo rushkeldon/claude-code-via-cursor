@@ -30,7 +30,7 @@ export interface PermissionData {
 export type NoticeVariant = 'warning' | 'info' | 'success';
 
 export interface ChatMsg {
-  role: 'user' | 'assistant' | 'system' | 'error' | 'thinking' | 'question' | 'permission' | 'notice' | 'tool' | 'tool-result';
+  role: 'user' | 'assistant' | 'system' | 'error' | 'thinking' | 'question' | 'permission' | 'notice' | 'tool' | 'tool-result' | 'forked';
   content: string;
   images?: Array<{ filePath: string; previewUri: string }>;
   elapsedLabel?: string;
@@ -158,6 +158,16 @@ on('notice' as any, (msg: any) => {
     content: data.content || '',
     noticeVariant: data.variant || 'warning',
     noticeTitle: data.title || 'Notice',
+    timestamp: Date.now(),
+  }];
+});
+
+on('forked' as any, (msg: any) => {
+  // Parent-window notice that this session was forked into a terminal. Bodyless
+  // inline card; the message text rides in `content`.
+  messages.value = [...messages.value, {
+    role: 'forked',
+    content: (msg.data && msg.data.message) || 'This session is now forked in your terminal',
     timestamp: Date.now(),
   }];
 });

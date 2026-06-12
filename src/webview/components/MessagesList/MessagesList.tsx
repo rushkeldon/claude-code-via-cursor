@@ -6,6 +6,7 @@ import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage';
 import { SystemMessage } from '../SystemMessage/SystemMessage';
 import { ErrorMessage } from '../ErrorMessage/ErrorMessage';
 import { NoticeCard } from '../NoticeCard/NoticeCard';
+import { ForkedCard } from '../ForkedCard/ForkedCard';
 import { ToolUseMessage } from '../ToolMessage/ToolMessage';
 import { ToolResultMessage } from '../ToolResultMessage/ToolResultMessage';
 import { ThinkingPill } from '../ThinkingPill/ThinkingPill';
@@ -39,6 +40,8 @@ function renderMessage(msg: ChatMsg & { elapsedLabel?: string }, index: number) 
           {msg.content && <p>{msg.content}</p>}
         </NoticeCard>
       );
+    case 'forked' as any:
+      return <ForkedCard key={index} message={msg.content} />;
     case 'tool' as any:
       // AskUserQuestion is shown as its own interactive Q&A card — don't also
       // render the generic tool card for it (it's redundant noise above the panel).

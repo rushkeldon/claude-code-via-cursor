@@ -5,12 +5,10 @@ import * as fs from "fs";
 import * as os from "os";
 import { log } from "./logger";
 import * as tokenCounters from "./tokenCounters";
-import * as profile from "./profile";
 import * as terminalCommands from "./terminalCommands";
 import * as settings from "./settings";
 import * as conversation from "./conversation";
 import * as permissions from "./permissions";
-import * as skillsAndPlugins from "./skillsAndPlugins";
 import * as subprocess from "./subprocess";
 import * as modes from "./modes";
 import * as sessionLock from "./sessionLock";
@@ -692,19 +690,6 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "openFile":
       await openFileInEditor(message.filePath);
       return;
-    case "requestIdentityProfile":
-      profile.readAndPushProfile();
-      return;
-    case "openProfileSwitcher": {
-      const term = vscode.window.createTerminal({ name: "Claude Profile" });
-      term.show();
-      const target =
-        typeof message.target === "string" && message.target.length > 0
-          ? " " + message.target
-          : " ";
-      term.sendText("setClaudeTo" + target, false);
-      return;
-    }
     case "reloadWindow":
       vscode.commands.executeCommand("workbench.action.reloadWindow");
       return;
@@ -764,13 +749,6 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "showInfoMessage":
       vscode.window.showInformationMessage(message.message);
       return;
-    case "marketplaceFetch":
-      await skillsAndPlugins.fetchMarketplace(
-        message.url,
-        message.append,
-        message.isSearch,
-      );
-      return;
     case "getPermissions":
       await permissions.sendPermissions();
       return;
@@ -780,49 +758,8 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "addPermission":
       await permissions.addPermission(message.toolName, message.command);
       return;
-    case "loadSkills":
-      await skillsAndPlugins.loadSkills();
-      return;
-    case "saveSkill":
-      await skillsAndPlugins.saveSkill(
-        message.name,
-        message.scope,
-        message.content,
-      );
-      return;
-    case "deleteSkill":
-      await skillsAndPlugins.deleteSkill(message.name, message.scope);
-      return;
-    case "searchSkills":
-      await skillsAndPlugins.searchSkills(message.query);
-      return;
     case "runTerminalCommand":
       terminalCommands.runTerminalCommand(message.command);
-      return;
-    case "loadPlugins":
-      await skillsAndPlugins.loadPlugins();
-      return;
-    case "installPlugin":
-      await skillsAndPlugins.installPlugin(message.installId);
-      return;
-    case "removePlugin":
-      await skillsAndPlugins.removePlugin(message.installId);
-      return;
-    case "loadMCPServers":
-      await skillsAndPlugins.loadMCPServers();
-      return;
-    case "saveMCPServer":
-      await skillsAndPlugins.saveMCPServer(
-        message.name,
-        message.config,
-        message.scope || "project",
-      );
-      return;
-    case "deleteMCPServer":
-      await skillsAndPlugins.deleteMCPServer(
-        message.name,
-        message.scope || "project",
-      );
       return;
     case "getCustomSnippets":
       await settings.sendCustomSnippets(deps.getGlobalState());
@@ -1485,6 +1422,29 @@ function runExternalLaunch(launchCmd: string): void {
 // original transcript is untouched and the fork gets a brand-new id this window
 // owns. No idle gate here: the forked session is a different process entirely,
 // and the locked session is owned by another window anyway.
+// Build a "lineage card" for a forked session so it inherits the parent's modes at
+// birth. A fork mints a NEW session id, so its per-session modes dir starts empty;
+// without this it would wake modeless. The card rides in as the fork's positional
+// prompt (opts.command) — the child reads it on turn one, re-enters the modes via
+// the modes skill (writing its OWN per-session file), then diverges independently.
+//
+// Returns "" when the parent has no active modes (→ a plain interactive fork, no
+// positional prompt). Shell-safe: no $, ", or backtick (the external launch path
+// wraps the command in double quotes), and the mode entries are skill-authored
+// values like "plan: ./doc" / "sbs" that never contain those characters.
+function buildForkLineageCard(parentSessionId: string | undefined): string {
+  const entries = modes.getActiveModeEntries();
+  if (entries.length === 0) {
+    return "";
+  }
+  const list = entries.map((e) => `- ${e}`).join("\n");
+  const from = parentSessionId ? ` (forkedFrom: ${parentSessionId})` : "";
+  return (
+    `This is a forked Claude Code session${from}.\n` +
+    `Use the modes skill to enter each of these modes:\n${list}`
+  );
+}
+
 function forkSessionToTerminal(sessionId: string | undefined): void {
   if (!sessionId) {
     vscode.window.showWarningMessage("No session to fork.");
@@ -1494,15 +1454,21 @@ function forkSessionToTerminal(sessionId: string | undefined): void {
   const yolo = config.get<boolean>("permissions.yoloMode", false);
   const model = settings.getLocalModel() || settings.getFullModelString().configured;
 
+  // Inherit the parent's modes at birth via a lineage card (empty → no card).
+  const card = buildForkLineageCard(sessionId);
+
   openTerminal({
     mode: "fork",
     cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
     sessionId,
+    command: card || undefined,
     model,
     yolo,
     name: "Claude fork",
   });
-  log.info("Webview", "forked session to terminal", { sessionId, model }, "🍴");
+  // Parent-window-only notice that a fork spun off (UI affordance, not a model turn).
+  postMessage({ type: "forked", data: { message: "This session is now forked in your terminal" } });
+  log.info("Webview", "forked session to terminal", { sessionId, model, inheritedModes: !!card }, "🍴");
 }
 
 // Breakout to a real terminal. Typed slash commands no longer route here —
@@ -1547,15 +1513,25 @@ async function launchSlashCommand(
   // is using, so the forked world matches.
   const model = settings.getLocalModel() || settings.getFullModelString().configured;
 
+  // Mode inheritance vs. explicit command — collision rule: an explicit slash
+  // command (e.g. a breakout `/compact`) is the user's deliberate first action for
+  // the fork and WINS; we don't dilute it with a mode-lineage card (a positional
+  // prompt is a single string — jamming both in is fragile). The lineage card fills
+  // in ONLY when there's no explicit command, so a plain breakout fork still
+  // inherits the parent's modes.
+  const launchCommand = fullCommand || buildForkLineageCard(sessionId) || undefined;
+
   openTerminal({
     mode: "fork",
     cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
     sessionId: sessionId || undefined,
-    command: fullCommand || undefined,
+    command: launchCommand,
     model,
     yolo,
     name: `Claude fork ${fullCommand}`.trim(),
   });
+  // Parent-window-only notice that a fork spun off (UI affordance, not a model turn).
+  postMessage({ type: "forked", data: { message: "This session is now forked in your terminal" } });
 }
 
 // Open a plain "cold" terminal at the workspace root — no claude, no fork, no

@@ -2,7 +2,7 @@
   "name": "claude-code-via-cursor",
   "displayName": "Claude Code via Cursor",
   "description": "A Cursor / VS Code extension that wraps the Claude Code CLI in a rich, editor-native chat interface — think Claude Desktop, but integrated with Cursor.",
-  "version": "3.0.0-appcloud9.184",
+  "version": "3.0.0-appcloud9.187",
   "publisher": "appcloud9",
   "author": "Keldon Rush (appcloud9.com)",
   "repository": {

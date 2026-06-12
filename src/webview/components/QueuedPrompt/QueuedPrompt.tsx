@@ -50,7 +50,7 @@ export function QueuedPrompt() {
           </svg>
         </span>
       )}
-      <span class="queued-prompt-text" title={head.preview}>{head.preview || '(empty)'}</span>
+      <span class="queued-prompt-text" title={head.preview}>{head.preview || 'Attachment(s) only'}</span>
       <div class="queued-prompt-actions">
         <button class="queued-prompt-btn" type="button" onClick={sendNow} title="Send now — interrupt the current turn and run this next">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">

@@ -1,6 +1,5 @@
 import { ChatMessage } from "../ChatMessage/ChatMessage";
 import { parseSimpleMarkdown } from "../../markdown";
-import { currentProfile } from "../../state/profile";
 import { post } from "../../vscode";
 
 interface UserMessageProps {
@@ -9,8 +8,7 @@ interface UserMessageProps {
 }
 
 export function UserMessage({ content, images }: UserMessageProps) {
-  const profile = currentProfile.value;
-  const label = profile ? `You (${profile})` : "You";
+  const label = "You";
 
   function openImage(filePath: string) {
     post({ type: "openImageFile", filePath } as any);
