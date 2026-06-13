@@ -12,7 +12,7 @@ export const IMG_DIR = path.join(
 	os.homedir(),
 	'Library',
 	'Application Support',
-	'claude-code-via-cursor',
+	'claude-code-via-ide',
 	'img',
 );
 

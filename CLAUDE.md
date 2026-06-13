@@ -77,26 +77,23 @@ Always bump `appcloud9.X` in `package.json` before packaging a new VSIX.
 
 Plan files (`*.plan.md`) must **never** name a specific version (e.g. "bump to appcloud9.73"). Always write "bump to the **next** version" instead. The number drifts — multiple agents bump `package.json` independently — so a hard-coded version in a plan goes stale and misleads. The version-bump todo reads the current `appcloud9.X` at execution time and increments it.
 
-### Plan workflow (`plan2cursor` + execution)
+### Plan workflow (`/plans` verbs + execution)
 
-When a plan is sent to Cursor via the `plan2cursor` skill, the file is copied into `~/.cursor/plans/` (the directory Cursor's plans panel watches). Two rules apply:
+When a plan is handed to Cursor via **`/plans toCursor [path]`**, the verb copies the file into `~/.cursor/plans/` (the directory Cursor's plans panel watches) **and archives the repo original into `doc/archive/` itself** — collapsing two editable copies down to one live file (the Cursor copy) plus one inert snapshot. The canonical, live copy is now the one under `~/.cursor/plans/`; edit *that* during execution, never the archived repo copy. (You no longer archive by hand — `toCursor` owns that step.) Then:
 
-1. **Archive the original.** Once the plan has been copied to `~/.cursor/plans/`, move the original repo copy into `doc/archive/`. The canonical, live copy is now the one under `~/.cursor/plans/` — edit *that* file during execution, never a stale repo copy. Keeping a duplicate in the repo root just invites editing the wrong one.
-
-2. **Keep the todos accurate at every step.** The `~/.cursor/plans/*.plan.md` file is **not a static snapshot** — Cursor's plans panel renders each todo's `status` field live. Whoever executes the plan MUST mutate the file as work progresses, or the panel sits frozen at "all pending" while code lands. Flip statuses **immediately, never batched**:
+**Keep the todos accurate at every step.** The `~/.cursor/plans/*.plan.md` file is **not a static snapshot** — Cursor's plans panel renders each todo's `status` field live, and `/plans build` flips them as it executes. Whoever executes the plan MUST mutate the file as work progresses, or the panel sits frozen at "all pending" while code lands. Flip statuses **immediately, never batched**:
    - `pending` → `in_progress` the moment you commit to a todo, *before* the first tool call against it (this is what makes the spinner appear).
    - `in_progress` → `completed` the moment you finish **and verify** it (tests pass / file exists / behavior confirmed — "compiles" ≠ "works"; don't mark complete on faith).
    - `in_progress` → `cancelled` if you bail, with a one-line note in the markdown body explaining why.
 
    Edit surgically: locate the todo by its stable UUID `id`, change only the `status:` line beneath it, leave every other byte untouched. Never re-emit the frontmatter, re-order todos, or regenerate UUIDs — Cursor's renderer is picky and a reformatted block drops the plan view back to plain markdown. The status keyword is **`in_progress` with an underscore** (`in-progress` with a hyphen silently fails to render).
 
-### `build2plan [path to plan.md]` (mini-skill)
+### `build2plan` = `/plans toCursor` then `/plans build` (verb composition)
 
-Take a finished plan file from the repo all the way through execution, in one command. Given a `*.plan.md` path:
+There is no bespoke `build2plan` skill — it's just two `/plans` verbs composed by the caller (the `plans` skill never auto-chains). To take a finished plan from the repo all the way through execution, given a `*.plan.md` path:
 
-1. **`plan2cursor [path]`** — copy the plan into `~/.cursor/plans/` so Cursor's plans panel renders it live (invoke the `plan2cursor` skill).
-2. **Archive the original** — move the repo copy into `doc/archive/`. The live copy is now the one in `~/.cursor/plans/`; edit *that* during execution, never the repo copy (per the "Archive the original" rule above).
-3. **Implement to the plan, keeping the TODOs updated** — execute the plan against the live `~/.cursor/plans/*.plan.md`, flipping each todo's `status` `pending → in_progress → completed` immediately and never batched (per the "Keep the todos accurate at every step" rule above — surgical `status:`-line edits only).
+1. **`/plans toCursor [path]`** — copies the plan into `~/.cursor/plans/`, opens it in Cursor, and archives the repo original (one step; see the plan workflow above). The Cursor copy is now the live plan.
+2. **`/plans build <cursor-path>`** — execute the plan against the live `~/.cursor/plans/*.plan.md`, flipping each todo's `status` `pending → in_progress → completed` immediately and never batched (per the "Keep the todos accurate at every step" rule above — surgical `status:`-line edits only).
 
 ## Reference project
 

@@ -12,6 +12,7 @@ import * as permissions from "./permissions";
 import * as subprocess from "./subprocess";
 import * as modes from "./modes";
 import * as sessionLock from "./sessionLock";
+import * as planHandoffs from "./plan_handoffs";
 
 type PostMessageFn = (message: any) => void;
 
@@ -93,7 +94,7 @@ export function show(
 
   panel = vscode.window.createWebviewPanel(
     "claudeChat",
-    "Claude Code via Cursor",
+    "Claude Code via IDE",
     actualColumn,
     {
       enableScripts: true,
@@ -183,7 +184,7 @@ export async function newSession(): Promise<void> {
     data: { isProcessing: false },
   });
 
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
   if (config.get<boolean>("permissions.yoloMode", false)) {
     conversation.sendAndSaveMessage({
       type: "notice",
@@ -270,7 +271,7 @@ function initializeWebview(): void {
 function checkFirstRun(): void {
   if (!deps) return;
   const globalState = deps.getGlobalState();
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
 
   const settingShown = config.get<boolean>("firstRun.hasShown", false);
   if (settingShown && globalState.get("hasShownFirstRun")) return;
@@ -284,14 +285,14 @@ function checkFirstRun(): void {
   const homedir = os.homedir();
   const installedPluginsPath = path.join(homedir, ".claude", "plugins", "installed_plugins.json");
   let modesInstalled = false;
-  let plan2cursorInstalled = false;
+  let plansInstalled = false;
 
   try {
     if (fs.existsSync(installedPluginsPath)) {
       const data = JSON.parse(fs.readFileSync(installedPluginsPath, "utf8"));
       const plugins = data?.plugins || {};
       modesInstalled = !!(plugins["modes@skills-anthropic"] && plugins["modes@skills-anthropic"].length > 0);
-      plan2cursorInstalled = !!(plugins["plan2cursor@skills-anthropic"] && plugins["plan2cursor@skills-anthropic"].length > 0);
+      plansInstalled = !!(plugins["plans@skills-anthropic"] && plugins["plans@skills-anthropic"].length > 0);
     }
   } catch {
     // ignore parse errors
@@ -303,7 +304,7 @@ function checkFirstRun(): void {
   // webview's listeners mount) and permanently suppress first-run.
   postMessage({
     type: "firstRunPrompt",
-    data: { modesInstalled, plan2cursorInstalled },
+    data: { modesInstalled, plansInstalled },
   });
 }
 
@@ -360,7 +361,7 @@ function detectTerminals(): void {
 function markFirstRunShown(): void {
   if (!deps) return;
   deps.getGlobalState().update("hasShownFirstRun", true);
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
   config.update("firstRun.hasShown", true, vscode.ConfigurationTarget.Global);
 }
 
@@ -425,6 +426,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
         message.text,
         message.planMode,
         message.images,
+        (message as any).ccvc,
       );
       return;
     case "newSession":
@@ -471,6 +473,29 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "checkSkillsInstalled":
       checkSkillsInstalled();
       return;
+    case "getPlanList":
+      await sendPlanList();
+      return;
+    case "recordPlanHandoff": {
+      // CCVI sent a toCursor — record the alias {original → source-of-truth} so
+      // the picker lists the live Cursor copy and suppresses the archived/original
+      // decoy. Expand ~ to an absolute path (planHandoffs + sendPlanList compare
+      // absolute paths).
+      const expand = (p: string) =>
+        p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p;
+      const original = expand((message as any).originalPlanFile || "");
+      const sot = expand((message as any).sourceOfTruthPlanFile || "");
+      if (original && sot) {
+        planHandoffs.record({
+          basename: path.basename(sot),
+          archivedPath: original,
+          target: "cursor",
+          livePath: sot,
+          handedOffWhen: "via plan-phase picker",
+        });
+      }
+      return;
+    }
     case "webviewReady":
       // The webview has mounted and its listeners are live — now it's safe to
       // post messages that have no second source (e.g. firstRunPrompt).
@@ -482,6 +507,10 @@ async function handleWebviewMessage(message: any): Promise<void> {
       // before the webview's listeners exist, so that setActiveMode push is lost.
       // Re-push now that the freshly-mounted webview is listening.
       modes.resync();
+      // Eager first-spawn: spawn the Claude Code subprocess immediately so the
+      // model picker, effort/thoughts pickers, and context chip populate before
+      // the first turn. Resume the last conversation with its own saved prefs.
+      await eagerFirstSpawn();
       return;
     case "firstRunShown":
       // The first-run modal actually rendered; latch the flags so it shows once.
@@ -493,7 +522,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
     case "resetFirstRun": {
       const globalState = deps.getGlobalState();
       globalState.update("hasShownFirstRun", false);
-      const config = vscode.workspace.getConfiguration("ccvc");
+      const config = vscode.workspace.getConfiguration("ccvi");
       config.update("firstRun.hasShown", false, vscode.ConfigurationTarget.Global);
       vscode.window.showInformationMessage("First-run experience will show on next launch.");
       return;
@@ -550,7 +579,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
       settings.sendCurrentSettings();
       return;
     case "getEnvVars": {
-      const evConfig = vscode.workspace.getConfiguration("ccvc");
+      const evConfig = vscode.workspace.getConfiguration("ccvi");
       const evVars = evConfig.get<Record<string, string>>(
         "environment.variables",
         {},
@@ -634,7 +663,7 @@ async function handleWebviewMessage(message: any): Promise<void> {
       return;
     case "saveCustomProvider":
       if (message.envVars) {
-        const cpConfig = vscode.workspace.getConfiguration("ccvc");
+        const cpConfig = vscode.workspace.getConfiguration("ccvi");
         const cpEnvVars = cpConfig.get<Record<string, string>>(
           "environment.variables",
           {},
@@ -804,7 +833,7 @@ function getHtmlForWebview(wv?: vscode.Webview): string {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${target.cspSource} 'unsafe-inline'; script-src ${target.cspSource}; img-src ${target.cspSource} data: https:;">
   <link rel="stylesheet" href="${cssUri}">
-  <title>Claude Code via Cursor</title>
+  <title>Claude Code via IDE</title>
 </head>
 <body>
   <div id="root"></div>
@@ -821,7 +850,7 @@ function sendPlatformInfo(): void {
   const dismissed = deps
     .getGlobalState()
     .get<boolean>("wslAlertDismissed", false);
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
   const wslEnabled = config.get<boolean>("wsl.enabled", false);
 
   postMessage({
@@ -1128,7 +1157,7 @@ type TerminalLaunchOpts = {
 // otherwise normalize the externalApp string into the enum (Terminal.app is the
 // default external target when nothing more specific matches).
 function getTerminalType(): TerminalType {
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
   if (config.get<boolean>("terminal.useIntegrated", true)) return "integrated";
   const app = (config.get<string>("terminal.externalApp", "") || "").toLowerCase();
   if (app.includes("iterm")) return "iterm";
@@ -1202,7 +1231,7 @@ function openTerminal(opts: TerminalLaunchOpts): void {
   // A custom launch template is a user override of all per-app logic — honor it
   // before the switch so we don't regress that feature. Cold uses a login shell;
   // fork uses the assembled claude command.
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
   const customTemplate = config.get<string>("terminal.customTemplate", "");
   if (type !== "integrated" && customTemplate) {
     const cmd =
@@ -1450,7 +1479,7 @@ function forkSessionToTerminal(sessionId: string | undefined): void {
     vscode.window.showWarningMessage("No session to fork.");
     return;
   }
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
   const yolo = config.get<boolean>("permissions.yoloMode", false);
   const model = settings.getLocalModel() || settings.getFullModelString().configured;
 
@@ -1502,7 +1531,7 @@ async function launchSlashCommand(
       ? command
       : `/${command}`
     : "";
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
 
   // Carry the extension's current YOLO mode into the breakaway terminal session
   // so the forked session picks up the same permission posture as the in-process
@@ -1539,7 +1568,7 @@ async function launchSlashCommand(
 // `ca` to re-authenticate). Honors the same terminal-type dispatch as the breakout.
 function launchColdTerminal(): void {
   log.debug("Webview", "launchColdTerminal", undefined, "➡️");
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
   const yolo = config.get<boolean>("permissions.yoloMode", false);
   openTerminal({
     mode: "cold",
@@ -1551,7 +1580,7 @@ function launchColdTerminal(): void {
 
 function installRecommendedSkills(): void {
   log.debug("Webview", "installRecommendedSkills", undefined, "➡️");
-  const config = vscode.workspace.getConfiguration("ccvc");
+  const config = vscode.workspace.getConfiguration("ccvi");
   const claudePath =
     (config.get<string>("executable.path", "") || "").trim() || "claude";
 
@@ -1589,13 +1618,13 @@ function installRecommendedSkills(): void {
 
           cp.execFile(
             claudePath,
-            ["plugin", "install", "plan2cursor@skills-anthropic", "-s", "user"],
+            ["plugin", "install", "plans@skills-anthropic", "-s", "user"],
             { timeout: 30000 },
             (err3) => {
               if (err3)
                 log.error(
                   "Webview",
-                  "plan2cursor install failed",
+                  "plans install failed",
                   { error: err3.message },
                   "💥",
                 );
@@ -1617,32 +1646,71 @@ function installRecommendedSkills(): void {
   );
 }
 
+// Build the plan list for the which-plan picker: every *.plan.md in the workspace
+// (recently-changed first), MINUS the archived decoys recorded in the handoff
+// table, PLUS the live ~/.cursor/plans copies those decoys point to. Whole-
+// workspace glob is required (not just the plan dir) so the handoff reconciliation
+// can see archived files wherever they live. Best-effort: errors → empty list.
+async function sendPlanList(): Promise<void> {
+  const entries: { path: string; label: string; mtime: number; location: "project" | "cursor" }[] = [];
+  try {
+    // Workspace *.plan.md, excluding node_modules. (findFiles respects the
+    // workspace root; the handoff table handles the archive/cursor reconciliation.)
+    const uris = await vscode.workspace.findFiles("**/*.plan.md", "**/node_modules/**", 500);
+    // Suppress by BASENAME, not exact path. A handed-off plan has a decoy somewhere
+    // in the workspace — the original (if "don't archive" left it) OR the moved/
+    // copied archive copy (whose post-move path CCVI never learned, since the skill
+    // did the move). Both share the basename of the live copy. Suppressing by
+    // basename catches every decoy regardless of where the skill put it; the live
+    // copy is added separately below. (Reconcile-on-read drops stale rows first.)
+    const handoffs = planHandoffs.list();
+    const suppressBasenames = new Set(handoffs.map((r) => path.basename(r.livePath)));
+    for (const uri of uris) {
+      const p = uri.fsPath;
+      if (suppressBasenames.has(path.basename(p))) { continue; } // decoy — live copy added below
+      let mtime = 0;
+      try { mtime = fs.statSync(p).mtimeMs; } catch { /* keep 0 */ }
+      entries.push({ path: p, label: path.basename(p), mtime, location: "project" });
+    }
+    // Add the live Cursor copies (out-of-workspace, so findFiles won't see them).
+    for (const row of handoffs) {
+      let mtime = 0;
+      try { mtime = fs.statSync(row.livePath).mtimeMs; } catch { /* keep 0 */ }
+      entries.push({ path: row.livePath, label: path.basename(row.livePath), mtime, location: "cursor" });
+    }
+  } catch (e: any) {
+    log.error("Webview", "sendPlanList failed", { error: e?.message ?? String(e) }, "💥");
+  }
+  entries.sort((a, b) => b.mtime - a.mtime); // recently-changed first
+  postMessage({ type: "planList", data: { plans: entries } });
+}
+
 function checkSkillsInstalled(): void {
   const homedir = os.homedir();
   const installedPluginsPath = path.join(homedir, ".claude", "plugins", "installed_plugins.json");
   let modesInstalled = false;
-  let plan2cursorInstalled = false;
+  let plansInstalled = false;
 
   try {
     if (fs.existsSync(installedPluginsPath)) {
       const data = JSON.parse(fs.readFileSync(installedPluginsPath, "utf8"));
       const plugins = data?.plugins || {};
       modesInstalled = !!(plugins["modes@skills-anthropic"] && plugins["modes@skills-anthropic"].length > 0);
-      plan2cursorInstalled = !!(plugins["plan2cursor@skills-anthropic"] && plugins["plan2cursor@skills-anthropic"].length > 0);
+      plansInstalled = !!(plugins["plans@skills-anthropic"] && plugins["plans@skills-anthropic"].length > 0);
     }
   } catch {
     // Fall back to filesystem check
     modesInstalled = fs.existsSync(
       path.join(homedir, ".claude", "skills", "modes", "SKILL.md"),
     );
-    plan2cursorInstalled = fs.existsSync(
-      path.join(homedir, ".claude", "skills", "plan2cursor", "SKILL.md"),
+    plansInstalled = fs.existsSync(
+      path.join(homedir, ".claude", "skills", "plans", "SKILL.md"),
     );
   }
 
   postMessage({
     type: "skillsStatus",
-    data: { modesInstalled, plan2cursorInstalled },
+    data: { modesInstalled, plansInstalled },
   });
 }
 
@@ -1816,7 +1884,7 @@ async function createImageFile(
       os.homedir(),
       "Library",
       "Application Support",
-      "claude-code-via-cursor",
+      "claude-code-via-ide",
       "img",
     );
     fs.mkdirSync(imagesDir, { recursive: true });
@@ -1865,6 +1933,41 @@ async function createImageFile(
     );
     vscode.window.showErrorMessage("Failed to create image file");
   }
+}
+
+// Eager first-spawn on webviewReady: spawn the subprocess immediately (so the
+// model picker, effort/thoughts, and context chip populate before the first turn)
+// and resume the last conversation with its own saved prefs. Fresh install (no
+// history) spawns a brand-new session with workspaceState/config defaults.
+async function eagerFirstSpawn(): Promise<void> {
+  log.debug("Webview", "enter eagerFirstSpawn", undefined, "➡️");
+  const latestConv = conversation.getLatestConversation();
+  if (latestConv) {
+    // Resume the last conversation: seed the session id (so --resume is passed)
+    // and apply its saved prefs (or fall through to workspaceState/config defaults).
+    conversation.setCurrentSessionId(latestConv.sessionId);
+    const convData = await conversation.loadConversationData(latestConv.filename);
+    const prefs = conversation.resolveSpawnPrefs(convData);
+    // Apply prefs BEFORE spawn so the spawn's thinkingSig matches and the first
+    // real turn won't trigger a respawn. Use recordSelectedModel (not setSelectedModel)
+    // to avoid the env-var/settings-file side effects — we just need the in-memory
+    // value set so getSelectedModel() returns the right model at spawn time.
+    settings.recordSelectedModel(prefs.model);
+    settings.setEffort(prefs.effort);
+    settings.setThoughtsOn(prefs.thoughtsOn);
+    log.debug("Webview", "eagerFirstSpawn — resuming last conversation", { sessionId: latestConv.sessionId, prefs }, "🔄");
+  } else {
+    // Fresh install / cleared history: spawn a brand-new session (no --resume).
+    // currentSessionId stays undefined so the CLI mints a new id. Prefs come from
+    // workspaceState/config defaults (resolveSpawnPrefs with no conversationData).
+    const prefs = conversation.resolveSpawnPrefs();
+    settings.recordSelectedModel(prefs.model);
+    settings.setEffort(prefs.effort);
+    settings.setThoughtsOn(prefs.thoughtsOn);
+    log.debug("Webview", "eagerFirstSpawn — fresh session (no history)", { prefs }, "🌱");
+  }
+  await subprocess.firstSpawn();
+  log.debug("Webview", "exit eagerFirstSpawn", undefined, "⬅️");
 }
 
 async function loadConversationHistory(filename: string): Promise<void> {

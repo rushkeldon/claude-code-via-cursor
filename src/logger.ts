@@ -1,9 +1,9 @@
-// claude-code-via-cursor fork — file-based logger modeled after the
+// claude-code-via-ide fork — file-based logger modeled after the
 // ChatStore LogService.swift.
 //
 // Writes ISO-timestamped lines to a daily-rotated file at
-//   ~/Library/Application Support/claude-code-via-cursor/Logs/
-//     claude-code-via-cursor-YYYY-MM-DD.log
+//   ~/Library/Application Support/claude-code-via-ide/Logs/
+//     claude-code-via-ide-YYYY-MM-DD.log
 //
 // Each line includes pid so multiple Cursor windows writing concurrently
 // can be disambiguated (one extension host per window; O_APPEND on macOS
@@ -53,7 +53,7 @@ function logsDir(): string {
 		os.homedir(),
 		'Library',
 		'Application Support',
-		'claude-code-via-cursor',
+		'claude-code-via-ide',
 		'Logs',
 	);
 	try { fs.mkdirSync(dir, { recursive: true }); } catch { /* best-effort */ }
@@ -69,7 +69,7 @@ function todayUtc(): string {
 }
 
 function logFilePath(): string {
-	return path.join(logsDir(), `claude-code-via-cursor-${todayUtc()}.log`);
+	return path.join(logsDir(), `claude-code-via-ide-${todayUtc()}.log`);
 }
 
 // Clamp any value to a printable string ≤ MAX_VALUE_LEN. Strings just get
@@ -152,7 +152,7 @@ function pruneOldLogs(): void {
 		const items = fs.readdirSync(dir);
 		let deleted = 0;
 		for (const name of items) {
-			if (!name.startsWith('claude-code-via-cursor-') || !name.endsWith('.log')) { continue; }
+			if (!name.startsWith('claude-code-via-ide-') || !name.endsWith('.log')) { continue; }
 			const full = path.join(dir, name);
 			try {
 				const stat = fs.statSync(full);
@@ -186,7 +186,7 @@ export function initLogger(opts?: { version?: string; mode?: string; }): void {
 	const mode = opts?.mode ?? '(unknown)';
 	// Two-line banner: first line is high-visibility for grepping; second
 	// line carries the runtime context.
-	emit('info', 'Logger', `═══ Claude Code via Cursor — v${v} (${mode}) ═══`, undefined, '🚀');
+	emit('info', 'Logger', `═══ Claude Code via IDE — v${v} (${mode}) ═══`, undefined, '🚀');
 	emit('info', 'Logger', 'session start', {
 		version: v,
 		mode,

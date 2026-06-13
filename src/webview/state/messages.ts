@@ -30,7 +30,7 @@ export interface PermissionData {
 export type NoticeVariant = 'warning' | 'info' | 'success';
 
 export interface ChatMsg {
-  role: 'user' | 'assistant' | 'system' | 'error' | 'thinking' | 'question' | 'permission' | 'notice' | 'tool' | 'tool-result' | 'forked';
+  role: 'user' | 'assistant' | 'system' | 'error' | 'thinking' | 'question' | 'permission' | 'notice' | 'tool' | 'tool-result' | 'forked' | 'ccvc';
   content: string;
   images?: Array<{ filePath: string; previewUri: string }>;
   elapsedLabel?: string;
@@ -53,6 +53,15 @@ on('userInput', (msg) => {
     role: 'user',
     content: msg.data || '',
     images: msg.images,
+    timestamp: Date.now(),
+  }];
+});
+
+// A CCVI-authored turn (plan-phase picker command) — rendered under the CCVI card.
+on('ccvcInput' as any, (msg: any) => {
+  messages.value = [...messages.value, {
+    role: 'ccvc',
+    content: msg.data || '',
     timestamp: Date.now(),
   }];
 });
@@ -114,6 +123,9 @@ on('loadConversation' as any, (msg: any) => {
     switch (entry.type) {
       case 'userInput':
         items.push({ role: 'user', content: data || '', images: entry.images, timestamp: Date.now() });
+        break;
+      case 'ccvcInput':
+        items.push({ role: 'ccvc', content: data || '', timestamp: Date.now() });
         break;
       case 'output':
         items.push({ role: 'assistant', content: data || '', timestamp: Date.now() });

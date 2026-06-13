@@ -20,11 +20,24 @@ export interface FullSettings {
   "modes.agentCommand"?: string;
   // Resolved two-item picker list (override-or-default), built by the host.
   "modes.items"?: ModeItem[];
+  // Editor registry for the /plans toIDE verb (see EditorRegistryRow). Optional so
+  // an older host build that doesn't send it falls back to the seeded default.
+  "plans.editors"?: EditorRegistryRow[];
+}
+
+// One row in the toIDE editor registry. `key` is the handle passed to
+// `/plans toIDE <key>`; `command` is the CLI binary launched (must be on PATH);
+// `directory` is where the plan is placed (leading ~ = home, leading / = absolute,
+// otherwise relative to the project cwd).
+export interface EditorRegistryRow {
+  key: string;
+  command: string;
+  directory: string;
 }
 
 // One entry in the prompt mode picker — exactly Plan + Agent. Each click sends
 // `command` as an explicit message (a blind passthrough to Claude). `command` is
-// resolved host-side from `ccvc.modes.{plan,agent}Command` (override or default).
+// resolved host-side from `ccvi.modes.{plan,agent}Command` (override or default).
 export interface ModeItem {
   id: string;
   label: string;
@@ -85,6 +98,20 @@ on("setActiveMode", (msg: any) => {
   if (msg.data?.mode === "agent" || msg.data?.mode === "plan") {
     activeMode.value = msg.data.mode;
   }
+});
+
+// Companion-skill install state, mirrored from the host's checkSkillsInstalled.
+// SHARED here (not module-local in SettingsModal) so any component can gate on it
+// — notably the plan-phase picker, which only shows when plansInstalled is true
+// (graceful degradation: no plans skill → no picker). Null until the host
+// answers; treat null as "unknown, assume not installed" for gating.
+export const skillsStatus = signal<{
+  modesInstalled: boolean;
+  plansInstalled: boolean;
+} | null>(null);
+
+on("skillsStatus" as any, (msg: any) => {
+  skillsStatus.value = msg.data;
 });
 
 on("modelConfig", (msg) => {

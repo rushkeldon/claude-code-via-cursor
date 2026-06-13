@@ -1,13 +1,13 @@
 {
-  "name": "claude-code-via-cursor",
-  "displayName": "Claude Code via Cursor",
+  "name": "claude-code-via-ide",
+  "displayName": "Claude Code via IDE",
   "description": "A Cursor / VS Code extension that wraps the Claude Code CLI in a rich, editor-native chat interface — think Claude Desktop, but integrated with Cursor.",
-  "version": "3.0.0-appcloud9.187",
+  "version": "3.0.0-appcloud9.198",
   "publisher": "appcloud9",
   "author": "Keldon Rush (appcloud9.com)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/rushkeldon/claude-code-via-cursor"
+    "url": "https://github.com/rushkeldon/claude-code-via-ide"
   },
   "license": "SEE LICENSE IN LICENSE",
   "engines": {
@@ -45,7 +45,7 @@
     "development",
     "productivity"
   ],
-  "icon": "icon.png",
+  "icon": "icon-bubble.png",
   "main": "./out/extension.js",
   "activationEvents": [
     "onStartupFinished"
@@ -53,15 +53,15 @@
   "contributes": {
     "commands": [
       {
-        "command": "claude-code-via-cursor.openChat",
-        "title": "Open Claude Code via Cursor",
-        "category": "Claude Code via Cursor",
+        "command": "claude-code-via-ide.openChat",
+        "title": "Open Claude Code via IDE",
+        "category": "Claude Code via IDE",
         "icon": "icon-bubble.png"
       }
     ],
     "keybindings": [
       {
-        "command": "claude-code-via-cursor.openChat",
+        "command": "claude-code-via-ide.openChat",
         "key": "ctrl+shift+c",
         "mac": "cmd+shift+c"
       }
@@ -69,72 +69,72 @@
     "menus": {
       "commandPalette": [
         {
-          "command": "claude-code-via-cursor.openChat"
+          "command": "claude-code-via-ide.openChat"
         }
       ],
       "editor/context": [
         {
-          "command": "claude-code-via-cursor.openChat",
+          "command": "claude-code-via-ide.openChat",
           "group": "claude@1",
           "when": "editorTextFocus"
         }
       ],
       "editor/title": [
         {
-          "command": "claude-code-via-cursor.openChat",
+          "command": "claude-code-via-ide.openChat",
           "group": "navigation@1",
           "when": "true"
         }
       ],
       "editor/title/context": [
         {
-          "command": "claude-code-via-cursor.openChat",
+          "command": "claude-code-via-ide.openChat",
           "group": "claude@1"
         }
       ],
       "explorer/context": [
         {
-          "command": "claude-code-via-cursor.openChat",
+          "command": "claude-code-via-ide.openChat",
           "group": "claude@1"
         }
       ],
       "scm/title": [
         {
-          "command": "claude-code-via-cursor.openChat",
+          "command": "claude-code-via-ide.openChat",
           "group": "navigation@1",
           "when": "true"
         }
       ],
       "view/title": [
         {
-          "command": "claude-code-via-cursor.openChat",
+          "command": "claude-code-via-ide.openChat",
           "group": "navigation@1",
           "when": "view == workbench.explorer.fileView"
         }
       ],
       "touchBar": [
         {
-          "command": "claude-code-via-cursor.openChat",
+          "command": "claude-code-via-ide.openChat",
           "group": "editing",
           "when": "true"
         }
       ],
       "menuBar/file": [
         {
-          "command": "claude-code-via-cursor.openChat",
+          "command": "claude-code-via-ide.openChat",
           "group": "1_new@1"
         }
       ]
     },
     "views": {
-      "claude-code-via-cursor": [
+      "claude-code-via-ide": [
         {
-          "id": "claude-code-via-cursor.chat",
+          "id": "claude-code-via-ide.chat",
           "type": "webview",
-          "name": "Claude Code via Cursor",
+          "name": "Claude Code via IDE",
           "when": "true",
           "icon": "icon-bubble.png",
-          "contextualTitle": "Claude Code via Cursor",
+          "contextualTitle": "Claude Code via IDE",
           "dropMimeTypes": [
             "text/uri-list"
           ]
@@ -144,104 +144,122 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "claude-code-via-cursor",
-          "title": "Claude Code via Cursor",
+          "id": "claude-code-via-ide",
+          "title": "Claude Code via IDE",
           "icon": "icon-bubble.png"
         }
       ]
     },
     "configuration": {
-      "title": "Claude Code via Cursor",
+      "title": "Claude Code via IDE",
       "properties": {
-        "ccvc.wsl.enabled": {
+        "ccvi.wsl.enabled": {
           "type": "boolean",
           "default": false,
           "description": "Enable WSL integration for running Claude"
         },
-        "ccvc.wsl.distro": {
+        "ccvi.wsl.distro": {
           "type": "string",
           "default": "Ubuntu",
           "description": "WSL distribution name (e.g., Ubuntu, Debian)"
         },
-        "ccvc.wsl.nodePath": {
+        "ccvi.wsl.nodePath": {
           "type": "string",
           "default": "",
           "description": "Optional path to Node.js in the WSL distribution. Only needed if Claude was installed via npm. Recent Claude installs ship as a native executable and don't require Node."
         },
-        "ccvc.wsl.claudePath": {
+        "ccvi.wsl.claudePath": {
           "type": "string",
           "default": "/usr/local/bin/claude",
           "description": "Path to Claude executable in the WSL distribution"
         },
-        "ccvc.thinking.show": {
+        "ccvi.thinking.show": {
           "type": "boolean",
           "default": true,
           "description": "Default for whether Claude's summarized thoughts are shown (the Thoughts toggle in the prompt pane). Per-session changes from the toggle take precedence."
         },
-        "ccvc.thinking.effort": {
+        "ccvi.thinking.effort": {
           "type": "string",
           "default": "",
           "description": "Default thinking effort/depth (e.g. low, medium, high, xhigh, max). Empty inherits the model's default. Per-session changes from the Effort picker take precedence; available levels are per-model."
         },
-        "ccvc.permissions.yoloMode": {
+        "ccvi.permissions.yoloMode": {
           "type": "boolean",
           "default": false,
           "description": "Enable Yolo Mode to skip all permission checks. Use with caution as Claude can execute any command without asking."
         },
-        "ccvc.executable.path": {
+        "ccvi.executable.path": {
           "type": "string",
           "default": "",
           "description": "Custom path to the Claude Code executable. Leave empty to use the default 'claude' command."
         },
-        "ccvc.environment.variables": {
+        "ccvi.environment.variables": {
           "type": "object",
           "default": {},
           "description": "Custom environment variables to pass to Claude Code. Example: {\"ANTHROPIC_API_KEY\": \"sk-...\"}. To fail faster when a turn is stuck on slow credential/connection resolution, you can set CLAUDE_CODE_MAX_RETRIES (default 10 — lower it, e.g. \"2\", to give up sooner) and/or API_TIMEOUT_MS (default 600000 — the per-request ceiling). These trade resilience on flaky networks for a faster failure, so leave them unset unless you want that."
         },
-        "ccvc.environment.disabled": {
+        "ccvi.environment.disabled": {
           "type": "boolean",
           "default": false,
           "description": "When enabled, custom environment variables are not passed to Claude Code."
         },
-        "ccvc.terminal.useIntegrated": {
+        "ccvi.terminal.useIntegrated": {
           "type": "boolean",
           "default": true,
           "description": "Use Cursor's integrated terminal for slash commands. Uncheck to use an external terminal."
         },
-        "ccvc.terminal.externalApp": {
+        "ccvi.terminal.externalApp": {
           "type": "string",
           "default": "",
           "description": "External terminal application name (e.g., iTerm2, Windows Terminal, kitty)."
         },
-        "ccvc.terminal.customTemplate": {
+        "ccvi.terminal.customTemplate": {
           "type": "string",
           "default": "",
           "description": "Custom terminal launch template. Use {{command}} as placeholder for the command to run."
         },
-        "ccvc.terminal.borderColor": {
+        "ccvi.terminal.borderColor": {
           "type": "string",
           "default": "#00ff41",
           "description": "Border color for the prompt in terminal mode."
         },
-        "ccvc.terminal.fontColor": {
+        "ccvi.terminal.fontColor": {
           "type": "string",
           "default": "#00ff41",
           "description": "Font color for the prompt in terminal mode."
         },
-        "ccvc.modes.planCommand": {
+        "ccvi.modes.planCommand": {
           "type": "string",
           "default": "",
           "description": "Command sent when the Plan mode pill is clicked. Leave empty to use the built-in default (`/modes plan ./doc`). Sent verbatim to Claude, so you can point it at any slash command or mode directive."
         },
-        "ccvc.modes.agentCommand": {
+        "ccvi.modes.agentCommand": {
           "type": "string",
           "default": "",
           "description": "Command sent when the Agent mode pill is clicked. Leave empty to use the built-in default (`/modes agent`). Sent verbatim to Claude, so you can point it at any slash command or mode directive."
         },
-        "ccvc.firstRun.hasShown": {
+        "ccvi.firstRun.hasShown": {
           "type": "boolean",
           "default": false,
           "description": "Whether the first-run experience has been shown. Uncheck to see it again on next launch."
+        },
+        "ccvi.plans.editors": {
+          "type": "array",
+          "default": [
+            { "key": "cursor", "command": "cursor", "directory": "~/.cursor/plans" },
+            { "key": "code", "command": "code", "directory": "doc" },
+            { "key": "idea", "command": "idea", "directory": "doc" }
+          ],
+          "description": "Editor registry for the /plans toIDE verb. Each row is { key, command, directory }: 'key' is the handle you pass to toIDE, 'command' is the CLI binary launched (must be on PATH), 'directory' is where the plan is placed (leading ~ expands to home, leading / is absolute, otherwise relative to the project). The 'cursor' row's directory is the only out-of-repo destination.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string", "description": "Handle passed to /plans toIDE <key>" },
+              "command": { "type": "string", "description": "CLI binary to launch (must be on PATH)" },
+              "directory": { "type": "string", "description": "Destination dir: ~ = home, / = absolute, else relative to project" }
+            },
+            "required": ["key", "command", "directory"]
+          }
         }
       }
     }

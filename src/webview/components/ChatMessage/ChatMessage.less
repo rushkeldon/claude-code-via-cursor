@@ -162,10 +162,44 @@
     }
   }
 
+  // CCVI card: a turn the EXTENSION authored on the user's behalf (a picker-emitted
+  // command, a generated write prompt, a silent difficulty rating, a subagent
+  // notice). Neither "YOU" (the user didn't type it) nor Claude's output — so it
+  // gets its own attribution + a distinct cyan accent, set apart from user-green,
+  // claude-brown, error-red, and the violet thinking pill.
+  &.ccvc {
+    border: 1px solid rgba(0, 191, 214, 0.25);
+    border-radius: 8px;
+    color: var(--vscode-editor-foreground);
+    position: relative;
+    overflow: hidden;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, #00bfd6 0%, #0090a8 100%);
+    }
+  }
+
   // Reveal the copy buttons (shared CopyButton; base style in CopyButton.less)
   // when the message is hovered.
   &:hover .copy-button {
     opacity: 0.7;
+  }
+
+  // CCVI command text (the /plans verb or NL prompt CCVI sent on the user's
+  // behalf) — monospace so the command reads as a command, like the prompt input.
+  .ccvc-command {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 12px;
+    color: var(--vscode-editor-foreground);
   }
 
   // Collapsed: only the header shows. Strip the header's divider (margin +

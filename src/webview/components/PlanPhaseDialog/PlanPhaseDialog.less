@@ -1,0 +1,39 @@
+// CCVI Q & A card — planning dialogue. Inherits AskUserQuestion.less for the card
+// chrome (header, question-block, options, free-text, buttons). Only the deltas
+// that distinguish a CCVI-authored dialogue from a Claude question live here.
+
+.ccvc-qa {
+  // The CCVI accent (cyan) — distinct from the Claude-question card, matching the
+  // ccvc ChatMessage card's left edge so the attribution reads consistently.
+  border-color: rgba(0, 191, 214, 0.3);
+
+  .ask-question-header {
+    color: var(--vscode-foreground);
+  }
+}
+
+// When `other…` reveals the full model list, keep it from growing unbounded —
+// scroll within the card (the display list can be long with legacy/1M variants).
+.ccvc-model-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+// `other…` plan reveal: the overflow <select> + the full-path field, stacked.
+.ccvc-other-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ccvc-plan-select {
+  width: 100%;
+  padding: 4px 6px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+}

@@ -8,6 +8,7 @@ import {
   permissionsData,
   detectedTerminals,
   modelConfig,
+  skillsStatus,
 } from "../../state/settings";
 
 export const settingsModalVisible = signal(false);
@@ -340,6 +341,74 @@ function EnvVariablesEditor() {
   );
 }
 
+function EditorRegistryEditor() {
+  const s = fullSettings.value;
+  if (!s) return null;
+
+  // Rows the toIDE verb resolves at launch time. Falls back to an empty editable
+  // row if the host sent nothing (older build); the package.json default normally
+  // seeds cursor/code/idea.
+  const rows = (s["plans.editors"] && s["plans.editors"].length > 0)
+    ? s["plans.editors"].map((r) => ({ ...r }))
+    : [{ key: "", command: "", directory: "" }];
+
+  function commit(updated: { key: string; command: string; directory: string }[]) {
+    const result = updated.filter((r) => r.key.trim());
+    updateSetting("plans.editors", result);
+  }
+
+  function handleFieldBlur(idx: number, field: "key" | "command" | "directory", value: string) {
+    const updated = rows.map((r) => ({ ...r }));
+    updated[idx][field] = value;
+    commit(updated);
+  }
+
+  function handleRemoveRow(idx: number) {
+    commit(rows.filter((_, i) => i !== idx));
+  }
+
+  function handleAddRow() {
+    commit([...rows, { key: "", command: "", directory: "" }]);
+  }
+
+  return (
+    <div class="env-editor">
+      <label class="settings-field-label">Plan Handoff Editors (/plans toIDE)</label>
+      {rows.map((row, idx) => (
+        <div class="env-row" key={idx}>
+          <input
+            type="text"
+            class="env-key"
+            placeholder="key"
+            value={row.key}
+            onBlur={(e) => handleFieldBlur(idx, "key", (e.target as HTMLInputElement).value)}
+          />
+          <input
+            type="text"
+            class="env-value"
+            placeholder="command"
+            value={row.command}
+            onBlur={(e) => handleFieldBlur(idx, "command", (e.target as HTMLInputElement).value)}
+          />
+          <input
+            type="text"
+            class="env-value"
+            placeholder="directory"
+            value={row.directory}
+            onBlur={(e) => handleFieldBlur(idx, "directory", (e.target as HTMLInputElement).value)}
+          />
+          <button class="env-remove" onClick={() => handleRemoveRow(idx)}>
+            ✕
+          </button>
+        </div>
+      ))}
+      <button class="btn-link" onClick={handleAddRow}>
+        + Add Editor
+      </button>
+    </div>
+  );
+}
+
 function CustomizeSection() {
   const s = fullSettings.value;
   if (!s) return null;
@@ -370,6 +439,7 @@ function CustomizeSection() {
           </p>
         </div>
         <EnvVariablesEditor />
+        <EditorRegistryEditor />
       </div>
     </div>
   );
@@ -421,6 +491,12 @@ function ModesSection() {
     </div>
   );
 }
+
+// NOTE: there is intentionally no "Spellcheck prompts" setting. Chromium's
+// spellchecker is gated at the Electron session level (VS Code/Cursor core owns
+// it); no public extension API enables it for a webview, so spellcheck on the
+// prompt textarea is inert here (verified). Prose spellcheck lives in the editor
+// (Code Spell Checker + cspell.json), not this sandboxed webview.
 
 function ModelSection() {
   const cfg = modelConfig.value;
@@ -478,15 +554,6 @@ function ModelSection() {
   );
 }
 
-const skillsStatus = signal<{
-  modesInstalled: boolean;
-  plan2cursorInstalled: boolean;
-} | null>(null);
-
-on("skillsStatus" as any, (msg: any) => {
-  skillsStatus.value = msg.data;
-});
-
 function FirstRunSection() {
   function resetFirstRun() {
     post({ type: "resetFirstRun" } as any);
@@ -507,6 +574,7 @@ function FirstRunSection() {
 
 function SkillsSection() {
   const status = skillsStatus.value;
+  const s = fullSettings.value || {};
 
   function checkStatus() {
     post({ type: "checkSkillsInstalled" } as any);
@@ -545,11 +613,11 @@ function SkillsSection() {
           )}
         </div>
         <div class="permission-item">
-          <span class="permission-tool">plan2cursor</span>
+          <span class="permission-tool">plans</span>
           <span class="permission-value">
-            Send plans to Cursor's plans panel
+            Review, verify, send to an editor, build, and update plans
           </span>
-          {status.plan2cursorInstalled ? (
+          {status.plansInstalled ? (
             <span style="color: var(--vscode-charts-green, #4ec9b0);">✓</span>
           ) : (
             <button class="btn-link" onClick={installSkills}>
@@ -729,7 +797,7 @@ function AboutPage() {
       </button>
 
       <div class="about-content">
-        <h2 class="about-title">Claude Code via Cursor</h2>
+        <h2 class="about-title">Claude Code via IDE</h2>
         <p class="about-tagline">
           A rich, multi-modal interface around the Claude Code CLI — full Claude
           Code power, inside your editor.
@@ -750,8 +818,8 @@ export function SettingsModal() {
     <Modal
       title={
         view === "about"
-          ? "Claude Code via Cursor — About"
-          : "Claude Code via Cursor — Settings"
+          ? "Claude Code via IDE — About"
+          : "Claude Code via IDE — Settings"
       }
       visible={settingsModalVisible.value}
       onClose={() => {

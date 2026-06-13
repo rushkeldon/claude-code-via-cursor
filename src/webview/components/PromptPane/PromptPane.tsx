@@ -5,7 +5,13 @@ import { useState, useRef, useEffect } from "preact/hooks";
 import { post, on } from "../../vscode";
 import { processing } from "../../state/session";
 import { commandList } from "../../state/commands";
-import { modeItems, activeMode, type ModeItem } from "../../state/settings";
+import { modeItems, activeMode, skillsStatus, type ModeItem } from "../../state/settings";
+import {
+  planPhase,
+  activePhaseDialog,
+  DIALOGUE_PHASES,
+  type PlanPhase,
+} from "../../state/plan_phase";
 import { ModelSelector } from "../ModelSelector/ModelSelector";
 import { EffortPicker } from "../EffortPicker/EffortPicker";
 import { ThoughtsToggle } from "../ThoughtsToggle/ThoughtsToggle";
@@ -13,6 +19,7 @@ import { DroppedFile } from "../DroppedFile/DroppedFile";
 import { CommandAutocomplete } from "../CommandAutocomplete/CommandAutocomplete";
 import { slashCommandsVisible } from "../SlashCommands/SlashCommands";
 import { QueuedPrompt } from "../QueuedPrompt/QueuedPrompt";
+import { PlanPhaseDialog } from "../PlanPhaseDialog/PlanPhaseDialog";
 import { pendingQuestions } from "../AskUserQuestion/AskUserQuestion";
 
 export interface DroppedFileData {
@@ -26,7 +33,7 @@ const terminalMode = signal(false);
 
 // The mode picker mirrors Cursor's: a pill showing the *real* active mode (read
 // by the host from the modes skill's active_modes.md → activeMode signal) that
-// opens a menu of configured items (modeItems signal, from ccvc.modes.items).
+// opens a menu of configured items (modeItems signal, from ccvi.modes.items).
 // Clicking an item SENDS its command explicitly (a visible turn); the pill does
 // NOT change optimistically — it updates only when the host reports the file
 // actually changed. Icons stay code-side, keyed by id, with a generic fallback
@@ -136,6 +143,27 @@ export function PromptPane() {
       document.removeEventListener("focusin", close);
     };
   }, [modeMenuOpen]);
+
+  // Plan-phase picker open/close (the second pill, shown only in Plan mode when
+  // the plans skill is installed). Same outside-click handling as the mode menu.
+  const [phaseMenuOpen, setPhaseMenuOpen] = useState(false);
+  const phaseRootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!phaseMenuOpen) return;
+    const close = (e: Event) => {
+      if (
+        phaseRootRef.current &&
+        !phaseRootRef.current.contains(e.target as Node)
+      )
+        setPhaseMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("focusin", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("focusin", close);
+    };
+  }, [phaseMenuOpen]);
 
   // Apply a demoted queued prompt to the (ref-based) textarea + flags. Reads the
   // signal so it re-runs whenever an item is pulled back via the card's ⬇.
@@ -285,9 +313,14 @@ export function PromptPane() {
   }
 
   function executeTerminalCommand() {
+    // Prefer the live textarea (the real source of truth) over terminalInput
+    // (a signal mirror). The mirror can lag the DOM — e.g. a paste splices the
+    // textarea directly without firing handleInput — so reading it first risks
+    // sending stale, truncated text. Fall back to the mirror only if the ref is
+    // somehow unavailable.
     const command = (
-      terminalInput.value ||
       textareaRef.current?.value ||
+      terminalInput.value ||
       ""
     ).trim();
     if (!command) return;
@@ -333,6 +366,26 @@ export function PromptPane() {
       text: cmd,
       planMode: planMode.value,
     });
+  }
+
+  // Selecting a plan phase. 'collaborate' is the inert baseline — it just sets the
+  // pill back to the resting state, no dialogue, no command. Every other phase
+  // opens its dialogue (which-plan + phase-specific fields); the dialogue, on
+  // commit, is what emits the real /plans verb or NL prompt. So the pill itself
+  // never sends anything — it only routes to a dialogue (current-not-fence: the
+  // dialogue is where the user confirms/edits before any action fires).
+  function selectPhase(phase: PlanPhase) {
+    setPhaseMenuOpen(false);
+    // The pill reflects the SELECTED phase immediately, on click — for every
+    // phase, before any dialog. Previously the pill only updated on dialog
+    // commit-with-a-plan-path, so 'write' (which has no plan path) and any
+    // cancelled dialog left the pill stuck on 'collaborate'. Set it here.
+    planPhase.value = phase;
+    if (phase === "collaborate") {
+      activePhaseDialog.value = null;
+      return;
+    }
+    activePhaseDialog.value = phase;
   }
 
   function selectImage() {
@@ -441,6 +494,12 @@ export function PromptPane() {
           ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
           ta.selectionStart = ta.selectionEnd = start + text.length;
           autoResize(ta);
+          // This handler called preventDefault(), so no native `input` event
+          // fires and handleInput never runs — meaning terminalInput (the slash-
+          // mode mirror that executeTerminalCommand reads) would keep its stale
+          // pre-paste value and the pasted tail (e.g. a long /path arg) would be
+          // silently dropped on send. Resync the mirror here while in terminal mode.
+          if (terminalMode.value) terminalInput.value = ta.value;
         }
       }
     }
@@ -516,6 +575,7 @@ export function PromptPane() {
 
   return (
     <div class="input-container">
+      <PlanPhaseDialog />
       <QueuedPrompt />
       {sendBlockedHint.value && (
         <div class="send-blocked-hint">Answer the question above first.</div>
@@ -571,6 +631,12 @@ export function PromptPane() {
                 onSelect={selectCommand}
               />
             )}
+            {/* No spellcheck attr: Chromium's spellchecker is gated at the Electron
+                SESSION level, owned by VS Code/Cursor core — no public extension API
+                enables it for a webview, so spellcheck="true" is inert here (verified:
+                attr lands in DOM, no squiggles). Upstream Claude-Code-extension request
+                was closed not-planned. Prose spellcheck belongs in the EDITOR (Code
+                Spell Checker + cspell.json), not this sandboxed webview textarea. */}
             <textarea
               ref={textareaRef}
               class={`input-field${terminalMode.value ? " terminal-mode" : ""}`}
@@ -654,6 +720,72 @@ export function PromptPane() {
                   </div>
                 )}
               </div>
+              {/* Plan-phase picker — second pill, RIGHT of the mode pill. Shows
+                  only in Plan mode AND only when the plans skill is installed
+                  (graceful degradation: no skill → no picker → Plan mode behaves
+                  as it always has). At rest: the current phase verb. Open: the 7
+                  phases, with a trailing ellipsis on the dialogue-spawning ones. */}
+              {activeMode.value === "plan" &&
+                skillsStatus.value?.plansInstalled && (
+                  <div class="phase-dropdown-wrapper" ref={phaseRootRef}>
+                    <button
+                      class="mode-dropdown-btn"
+                      type="button"
+                      onClick={() => setPhaseMenuOpen(!phaseMenuOpen)}
+                      title="Plan phase"
+                    >
+                      <span class="mode-dropdown-text">{planPhase.value}</span>
+                      <svg
+                        width="8"
+                        height="8"
+                        viewBox="0 0 8 8"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M1 2.5l3 3 3-3" />
+                      </svg>
+                    </button>
+                    {phaseMenuOpen && (
+                      <div class="mode-menu" role="listbox">
+                        {(
+                          [
+                            "collaborate",
+                            "write",
+                            "review",
+                            "verify",
+                            "update",
+                            "build",
+                            "toIDE",
+                          ] as PlanPhase[]
+                        ).map((p) => {
+                          const isSel = p === planPhase.value;
+                          const spawnsDialog = DIALOGUE_PHASES.includes(p);
+                          return (
+                            <button
+                              key={p}
+                              class={`mode-menu-item${isSel ? " selected" : ""}`}
+                              type="button"
+                              role="option"
+                              aria-selected={isSel}
+                              onClick={() => selectPhase(p)}
+                            >
+                              <span class="mode-menu-item-label">
+                                {p}
+                                {spawnsDialog ? "…" : ""}
+                              </span>
+                              {isSel && (
+                                <span class="mode-menu-item-check">✓</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
             </div>
             <div class="right-controls">
               <button

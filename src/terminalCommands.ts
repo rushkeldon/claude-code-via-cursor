@@ -25,7 +25,7 @@ export function buildWslClaudeCommand(nodePath: string, claudePath: string, args
 
 export function buildClaudeTerminalOptions(args: string[] = []): { shellPath: string; shellArgs: string[] } {
 	log.debug('Terminals', 'enter buildClaudeTerminalOptions', { args }, '➡️');
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 	const wslEnabled = config.get<boolean>('wsl.enabled', false);
 
 	if (wslEnabled) {
@@ -145,7 +145,7 @@ export function executeSlashCommand(command: string, currentSessionId: string | 
 export async function enableYoloMode(postMessage: PostMessageFn, sendCurrentSettings: () => void): Promise<void> {
 	log.debug('Terminals', 'enter enableYoloMode', undefined, '➡️');
 	try {
-		const config = vscode.workspace.getConfiguration('ccvc');
+		const config = vscode.workspace.getConfiguration('ccvi');
 		await config.update('permissions.yoloMode', true, vscode.ConfigurationTarget.Workspace);
 		sendCurrentSettings();
 		log.debug('Terminals', 'exit enableYoloMode — enabled', undefined, '⬅️');
@@ -163,7 +163,7 @@ export async function runInstallCommand(
 	log.info('Terminals', 'enter runInstallCommand', { method, globalStoragePath }, '➡️');
 	globalState.update('installAttempted', true);
 
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 	const wslEnabled = config.get<boolean>('wsl.enabled', false);
 	const platform = process.platform;
 	const arch = os.arch();
@@ -174,7 +174,7 @@ export async function runInstallCommand(
 			type: 'installComplete',
 			success: false,
 			method,
-			error: 'WSL mode: please install Claude inside your WSL distro, then set ccvc.wsl.claudePath.',
+			error: 'WSL mode: please install Claude inside your WSL distro, then set ccvi.wsl.claudePath.',
 			errorCode: 'WSL_NOT_SUPPORTED',
 			platform,
 			arch

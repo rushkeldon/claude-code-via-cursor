@@ -8,6 +8,7 @@ import * as permissions from './permissions';
 import * as subprocess from './subprocess';
 import * as modes from './modes';
 import * as sessionLock from './sessionLock';
+import * as planHandoffs from './plan_handoffs';
 import * as webview from './webview';
 import { sweepOrphanImages } from './sessionImages';
 
@@ -76,6 +77,10 @@ export function activate(context: vscode.ExtensionContext) {
 	// path so the lock is shared across windows of the same workspace.
 	sessionLock.init(context.globalStorageUri.fsPath);
 
+	// Persistent toCursor handoff table (workspace storage) — maps archived plan
+	// decoys to their live ~/.cursor/plans copies for the which-plan picker.
+	planHandoffs.init(context.storageUri?.fsPath);
+
 	const latestConversation = conversation.getLatestConversation();
 	conversation.setCurrentSessionId(latestConversation?.sessionId);
 
@@ -86,17 +91,17 @@ export function activate(context: vscode.ExtensionContext) {
 	sweepOrphanImages(conversation.getConversationIndex());
 
 	// Register commands
-	const disposable = vscode.commands.registerCommand('claude-code-via-cursor.openChat', (column?: vscode.ViewColumn) => {
+	const disposable = vscode.commands.registerCommand('claude-code-via-ide.openChat', (column?: vscode.ViewColumn) => {
 		webview.show(column);
 	});
 
-	const loadConversationDisposable = vscode.commands.registerCommand('claude-code-via-cursor.loadConversation', (filename: string) => {
+	const loadConversationDisposable = vscode.commands.registerCommand('claude-code-via-ide.loadConversation', (filename: string) => {
 		webview.loadConversation(filename);
 	});
 
 	// Register webview view provider for sidebar chat
 	const webviewProvider = new webview.ClaudeChatWebviewProvider(context.extensionUri);
-	vscode.window.registerWebviewViewProvider('claude-code-via-cursor.chat', webviewProvider);
+	vscode.window.registerWebviewViewProvider('claude-code-via-ide.chat', webviewProvider);
 
 	// Register custom content provider for read-only diff views
 	const diffProvider = new DiffContentProvider();
@@ -104,13 +109,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Listen for configuration changes
 	const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(event => {
-		if (event.affectsConfiguration('ccvc.wsl')) {
+		if (event.affectsConfiguration('ccvi.wsl')) {
 			webview.newSessionOnConfigChange();
 		}
 		// Live-reload the mode picker when either mode command changes — no window
-		// reload needed. Watches the whole `ccvc.modes` namespace (planCommand +
+		// reload needed. Watches the whole `ccvi.modes` namespace (planCommand +
 		// agentCommand).
-		if (event.affectsConfiguration('ccvc.modes')) {
+		if (event.affectsConfiguration('ccvi.modes')) {
 			settings.sendCurrentSettings();
 		}
 	});
@@ -118,8 +123,8 @@ export function activate(context: vscode.ExtensionContext) {
 	// Create status bar item
 	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	statusBarItem.text = "Claude";
-	statusBarItem.tooltip = "Open CCVC (Ctrl+Shift+C)";
-	statusBarItem.command = 'claude-code-via-cursor.openChat';
+	statusBarItem.tooltip = "Open CCVI (Ctrl+Shift+C)";
+	statusBarItem.command = 'claude-code-via-ide.openChat';
 	statusBarItem.show();
 
 	// Settings watcher. Requests a graceful subprocess restart at the next idle

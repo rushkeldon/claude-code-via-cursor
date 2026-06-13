@@ -105,7 +105,7 @@ Two architectural decisions are already made:
 **Execution context:** this work happens in a **new `CCVI` repo**. This `CCVC`
 repo is checked out alongside it as a **read-only reference/resource** — the
 plugin reuses CCVC's webview source and host source, so keep CCVC available at a
-known sibling path during the build (e.g. `../claude-code-via-cursor`). This plan
+known sibling path during the build (e.g. `../claude-code-via-ide`). This plan
 file lives in CCVC's `doc/` but describes work performed in the CCVI repo.
 
 ## The key insight that makes this feasible

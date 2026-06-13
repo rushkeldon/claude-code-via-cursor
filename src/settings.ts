@@ -24,7 +24,7 @@ export function init(d: SettingsDeps): void {
 	log.info('Settings', 'init', { hasPostMessage: !!d.postMessage }, '🔧');
 	deps = d;
 	selectedModel = d.workspaceState.get('claude.selectedModel', 'default');
-	const cfg = vscode.workspace.getConfiguration('ccvc');
+	const cfg = vscode.workspace.getConfiguration('ccvi');
 	const wsThoughts = d.workspaceState.get<boolean | undefined>('claude.thoughtsOn', undefined);
 	thoughtsOn = typeof wsThoughts === 'boolean' ? wsThoughts : cfg.get<boolean>('thinking.show', true);
 	const wsEffort = d.workspaceState.get<string | undefined>('claude.effort', undefined);
@@ -212,7 +212,7 @@ export function getFullModelString(): { configured?: string; resolvedEnv?: strin
 
 // The mode picker is exactly two pills — Plan and Agent — each a blind passthrough
 // of a command string to Claude. The user can override each command via
-// `ccvc.modes.{plan,agent}Command`; an empty/whitespace value falls back to the
+// `ccvi.modes.{plan,agent}Command`; an empty/whitespace value falls back to the
 // built-in default below (so the placeholder text in the settings UI *is* the
 // default). These defaults are the source of truth, mirrored by the package.json
 // `default: ""` (empty → use these).
@@ -227,7 +227,7 @@ function resolveModeCommand(raw: unknown, fallback: string): string {
 
 export function sendCurrentSettings(): void {
 	log.debug('Settings', 'enter sendCurrentSettings', undefined, '➡️');
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 	const settings = {
 		'wsl.enabled': config.get<boolean>('wsl.enabled', false),
 		'wsl.distro': config.get<string>('wsl.distro', 'Ubuntu'),
@@ -248,7 +248,10 @@ export function sendCurrentSettings(): void {
 		'modes.items': [
 			{ id: 'agent', label: 'Agent', command: resolveModeCommand(config.get('modes.agentCommand'), DEFAULT_AGENT_COMMAND) },
 			{ id: 'plan', label: 'Plan', command: resolveModeCommand(config.get('modes.planCommand'), DEFAULT_PLAN_COMMAND) },
-		]
+		],
+		// Editor registry for the /plans toIDE verb. The package.json default seeds
+		// cursor/code/idea; the Settings dialog edits this array.
+		'plans.editors': config.get<Array<{ key: string; command: string; directory: string }>>('plans.editors', [])
 	};
 
 	deps?.postMessage({
@@ -260,7 +263,7 @@ export function sendCurrentSettings(): void {
 
 export async function setEnvsDisabled(disabled: boolean): Promise<void> {
 	log.debug('Settings', 'enter setEnvsDisabled', { disabled }, '➡️');
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 	await config.update('environment.disabled', disabled, vscode.ConfigurationTarget.Global);
 	sendCurrentSettings();
 	log.debug('Settings', 'exit setEnvsDisabled', undefined, '⬅️');
@@ -268,7 +271,7 @@ export async function setEnvsDisabled(disabled: boolean): Promise<void> {
 
 export async function updateSettings(settings: { [key: string]: any }): Promise<void> {
 	log.debug('Settings', 'enter updateSettings', { keys: Object.keys(settings) }, '➡️');
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 
 	try {
 		for (const [key, value] of Object.entries(settings)) {
@@ -317,7 +320,7 @@ export async function setSelectedModel(model: string, tierModels?: { sonnet: str
 
 export async function setModelEnvVars(model: string, tierModels?: { sonnet: string; opus: string; haiku: string }): Promise<void> {
 	log.debug('Settings', 'enter setModelEnvVars', { model, tierModels }, '➡️');
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 	const envVars = config.get<Record<string, string>>('environment.variables', {});
 	envVars['ANTHROPIC_DEFAULT_SONNET_MODEL'] = tierModels?.sonnet || model;
 	envVars['ANTHROPIC_DEFAULT_OPUS_MODEL'] = tierModels?.opus || model;
@@ -328,7 +331,7 @@ export async function setModelEnvVars(model: string, tierModels?: { sonnet: stri
 
 export async function removeModelEnvVars(): Promise<void> {
 	log.debug('Settings', 'enter removeModelEnvVars', undefined, '➡️');
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 	const envVars = config.get<Record<string, string>>('environment.variables', {});
 	const filtered: Record<string, string> = {};
 	for (const [key, value] of Object.entries(envVars)) {

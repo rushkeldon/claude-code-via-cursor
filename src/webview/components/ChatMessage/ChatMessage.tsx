@@ -4,7 +4,7 @@ import { CopyButton } from '../CopyButton/CopyButton';
 import { useCollapsible } from '../Collapsible/useCollapsible';
 
 interface ChatMessageProps {
-  type: 'user' | 'claude' | 'error' | 'system' | 'tool' | 'tool-result' | 'thinking';
+  type: 'user' | 'claude' | 'error' | 'system' | 'tool' | 'tool-result' | 'thinking' | 'ccvc';
   icon?: string;
   label?: string;
   showHeader?: boolean;

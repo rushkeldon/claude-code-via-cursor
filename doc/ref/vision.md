@@ -29,7 +29,7 @@ good editor-native UI. We're building our idea of what Anthropic *should* be shi
    Cursor has no Claude Code depth. We sit on the seam: Claude Code's agency *plus*
    Cursor's native plan UI ticking off todos live as the agent works. Neither
    competitor can tell this story. Lean into it — the plan → review → approve →
-   execute loop (via the `modes` + `plan2cursor` skills) is a headline, not a
+   execute loop (via the `modes` + `plans` skills) is a headline, not a
    footnote. A live demo of checkboxes completing while the agent runs sells it
    harder than any prose.
 
@@ -70,7 +70,7 @@ The rule that falls out, and the corollary that bounds it:
   slash-command pass-through. We wrap and present; we don't fork behavior or
   sideload (e.g. hand-writing CC's internal config formats — the predecessor's
   mistake). The only sanctioned net-new pieces are the two companion skills
-  (`modes`, `plan2cursor`).
+  (`modes`, `plans`).
 
 ## Design principles (decision tie-breakers)
 
@@ -88,6 +88,14 @@ The rule that falls out, and the corollary that bounds it:
   `Shift+Tab`) is a *capability* wearing a keyboard costume. Strip the costume,
   keep the capability, give it a GUI-native affordance. (See the capability-vs-
   keystroke section above.)
+- **Whoever has to keep the promise should be involved in making it.** When work
+  will be handed off to another actor, that actor should co-sign the spec before
+  committing to it — they catch the gaps an author can't see. Concretely for the
+  plan loop: the plan's **reviewer should be the prospective implementer** (the
+  same model tier that will execute it), running fresh-context against only the
+  plan bytes — so "I can build this with no open questions" is ground truth from
+  the one who has to deliver it, not a guess by the author. This is why the review
+  affordance *suggests* the implementer's model rather than reviewing in-place.
 
 ## Non-goals (for now)
 

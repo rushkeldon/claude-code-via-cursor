@@ -2,6 +2,7 @@ import './MessagesList.less';
 import { useRef, useLayoutEffect } from 'preact/hooks';
 import { messages, ChatMsg } from '../../state/messages';
 import { UserMessage } from '../UserMessage/UserMessage';
+import { ChatMessage } from '../ChatMessage/ChatMessage';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage';
 import { SystemMessage } from '../SystemMessage/SystemMessage';
 import { ErrorMessage } from '../ErrorMessage/ErrorMessage';
@@ -42,6 +43,16 @@ function renderMessage(msg: ChatMsg & { elapsedLabel?: string }, index: number) 
       );
     case 'forked' as any:
       return <ForkedCard key={index} message={msg.content} />;
+    case 'ccvc' as any:
+      // A turn CCVI authored on the user's behalf (a plan-phase picker command).
+      // Shown under the CCVI card — its own attribution, neither YOU nor Claude.
+      // The command text is the content (transparency: the user sees exactly what
+      // was sent, and learns the /plans verb).
+      return (
+        <ChatMessage key={index} type="ccvc" icon="⚙" label="CCVI">
+          <pre class="ccvc-command">{msg.content}</pre>
+        </ChatMessage>
+      );
     case 'tool' as any:
       // AskUserQuestion is shown as its own interactive Q&A card — don't also
       // render the generic tool card for it (it's redundant noise above the panel).

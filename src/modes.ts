@@ -5,13 +5,15 @@ import { log } from './logger';
 
 // Mode-state mirror for the prompt mode picker.
 //
-// The `modes` skill records the active mode(s) in `active_modes.md` inside
-// Claude's per-project auto-memory directory. That file is the single source of
-// truth; the pill must reflect it, never an optimistic click. We don't derive
-// the path (the encoding is a CLI-internal convention) — instead it's discovered
-// from the CLI's own tool-call stream (subprocess sees a Read/Write whose
-// file_path ends in active_modes.md), cached in workspaceState, then read +
-// FileSystemWatcher'd. See doc/archive/mode_state.plan.md.
+// The `modes` skill records the active mode(s) in a PER-SESSION
+// `<session_id>/active_modes.md` inside Claude's auto-memory directory (keyed by
+// session id — there is no flat/project-global file). That file is the single
+// source of truth; the pill must reflect it, never an optimistic click. We don't
+// derive the path (the encoding is a CLI-internal convention, and the session id
+// isn't ours to construct) — instead it's discovered from the CLI's own tool-call
+// stream (subprocess sees a Read/Write whose file_path ends in active_modes.md),
+// cached in workspaceState, then read + FileSystemWatcher'd. This path-agnostic
+// discovery is exactly why it tracks the per-session file with no code change.
 //
 // plan↔agent is a mutex, so the pill mode is exactly one of 'agent' | 'plan'.
 // A missing/empty/unreadable file means no modes → display the default, 'agent'.

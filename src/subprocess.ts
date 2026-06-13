@@ -52,6 +52,7 @@ let queuedTurns: Array<{
 	message: string;
 	planMode?: boolean;
 	images?: Array<string | { filePath: string; previewUri?: string }>;
+	ccvc?: boolean;
 }> = [];
 let queueSeq = 0;
 
@@ -227,6 +228,27 @@ export function markUserPaused(reason: 'new-session' | 'history'): void {
 	userPausedSession = { reason };
 }
 
+// Eager first-spawn on webviewReady: spawns the Claude process immediately (so
+// the model picker, effort/thoughts, and context chip populate before the first
+// turn), without sending a prompt. Guards against double-spawn — no-op if a live
+// process already exists (webviewReady can fire on re-mount). Returns true if a
+// spawn was performed, false otherwise (already live or spawn failed).
+export async function firstSpawn(): Promise<boolean> {
+	if (currentClaudeProcess) {
+		log.debug('Subprocess', 'firstSpawn no-op — process already live', { pid: currentClaudeProcess.pid }, '🔥');
+		return false;
+	}
+	log.info('Subprocess', 'firstSpawn — eager spawn', undefined, '🚀');
+	// Plan mode is no longer a spawn arg (it's a prompt-injected skill now), so
+	// pass false — the spawnProcess path will use the current plan/agent state
+	// without forcing anything.
+	const ok = await spawnProcess(false);
+	if (!ok) {
+		log.warn('Subprocess', 'firstSpawn failed', undefined, '⚠️');
+	}
+	return ok;
+}
+
 // True while a deliberate respawn is in progress (plan-mode toggle, thinking
 // signature change, etc.). killProcess() will fire proc.on('error') with an
 // AbortError — that's expected, not a failure, so the error handler swallows it
@@ -301,7 +323,7 @@ export function getProcess(): cp.ChildProcess | undefined {
 
 export function convertToWSLPath(windowsPath: string): string {
 	log.debug('Subprocess', 'enter convertToWSLPath', { windowsPath }, '➡️');
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 	const wslEnabled = config.get<boolean>('wsl.enabled', false);
 
 	if (wslEnabled && windowsPath.match(/^[a-zA-Z]:/)) {
@@ -406,7 +428,7 @@ function rejectAllPendingControl(reason: string): void {
 // if a turn is already in flight we queue the message and flush it at turn end
 // (onTurnEnd) — we never spawn a second child. Otherwise we run the turn,
 // reusing the warm process if one exists (or spawning lazily if not).
-export async function sendMessage(message: string, planMode?: boolean, images?: Array<string | { filePath: string; previewUri?: string }>): Promise<void> {
+export async function sendMessage(message: string, planMode?: boolean, images?: Array<string | { filePath: string; previewUri?: string }>, ccvc?: boolean): Promise<void> {
 	if (!deps) { return; }
 
 	log.info('ClaudeProcess', 'sendMessage', {
@@ -422,26 +444,29 @@ export async function sendMessage(message: string, planMode?: boolean, images?: 
 
 	if (isProcessing) {
 		// A turn is already in flight — queue rather than spawn a second child.
-		queuedTurns.push({ id: `q-${++queueSeq}`, message, planMode, images });
+		queuedTurns.push({ id: `q-${++queueSeq}`, message, planMode, images, ccvc });
 		log.info('ClaudeProcess', 'turn queued (turn in flight)', { queueLen: queuedTurns.length }, '⏸️');
 		emitQueueState();
 		return;
 	}
 
-	await runTurn({ message, planMode, images });
+	await runTurn({ message, planMode, images, ccvc });
 }
 
 interface Turn {
 	message: string;
 	planMode?: boolean;
 	images?: Array<string | { filePath: string; previewUri?: string }>;
+	// True when CCVI itself authored this turn (a plan-phase picker command), not
+	// the user typing. Drives the CCVI echo card instead of the user card.
+	ccvc?: boolean;
 }
 
 async function runTurn(turn: Turn): Promise<void> {
 	if (!deps) { return; }
 	// Remember this turn so an API error mid-flight can capture it for Respawn.
 	currentTurn = turn;
-	const { message, planMode, images } = turn;
+	const { message, planMode, images, ccvc } = turn;
 
 	// Thinking depth/visibility is controlled by the Effort/Thoughts pickers via
 	// launch-injected --settings — not by prompt-prefix magic words. (The old
@@ -455,7 +480,10 @@ async function runTurn(turn: Turn): Promise<void> {
 		typeof img === 'string' ? { filePath: img } : { filePath: img.filePath, previewUri: img.previewUri }
 	);
 	conversation.sendAndSaveMessage({
-		type: 'userInput',
+		// A CCVI-authored turn (plan-phase picker command) echoes as 'ccvcInput' so
+		// the webview renders it under the CCVI card — neither "YOU" (the user
+		// didn't type it) nor Claude. A normal user turn stays 'userInput'.
+		type: ccvc ? 'ccvcInput' : 'userInput',
 		data: message,
 		images: echoImages.length > 0 ? echoImages : undefined
 	});
@@ -541,7 +569,7 @@ async function spawnProcess(planMode: boolean): Promise<boolean> {
 		'--verbose'
 	];
 
-	const config = vscode.workspace.getConfiguration('ccvc');
+	const config = vscode.workspace.getConfiguration('ccvi');
 
 	// Always route tool permissions through the stdio prompt tool — never
 	// --dangerously-skip-permissions. The skip flag suppresses can_use_tool

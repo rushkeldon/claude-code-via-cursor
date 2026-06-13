@@ -8,13 +8,13 @@ import { modelConfig } from "../../state/settings";
 const firstRunVisible = signal(false);
 const skillsData = signal<{
   modesInstalled: boolean;
-  plan2cursorInstalled: boolean;
+  plansInstalled: boolean;
 } | null>(null);
 
 on("firstRunPrompt" as any, (msg: any) => {
   skillsData.value = msg.data || {
     modesInstalled: false,
-    plan2cursorInstalled: false,
+    plansInstalled: false,
   };
   firstRunVisible.value = true;
   // Fetch the model config so the first-run model prompt knows whether a model
@@ -74,7 +74,7 @@ export function FirstRun() {
 
   return (
     <Modal
-      title="Welcome to Claude Code via Cursor"
+      title="Welcome to Claude Code via IDE"
       visible={firstRunVisible.value}
       onClose={dismiss}
     >
@@ -111,12 +111,12 @@ export function FirstRun() {
             )}
           </div>
           <div class="first-run-skill">
-            <span class="first-run-skill-name">plan2cursor</span>
+            <span class="first-run-skill-name">plans</span>
             <span class="first-run-skill-desc">
-              Send a .plan.md file to Cursor and have Claude Code update the
-              TODO list as it implements against that plan.
+              Plan lifecycle: review, verify, send to Cursor, build, and update
+              a .plan.md — Claude Code flips the TODO list live as it implements.
             </span>
-            {data?.plan2cursorInstalled ? (
+            {data?.plansInstalled ? (
               <span class="first-run-skill-check">✓ Installed</span>
             ) : (
               <span class="first-run-skill-pending">Not installed</span>
@@ -127,7 +127,7 @@ export function FirstRun() {
         <ModelSetup />
 
         <div class="first-run-actions">
-          {(!data?.modesInstalled || !data?.plan2cursorInstalled) && (
+          {(!data?.modesInstalled || !data?.plansInstalled) && (
             <button
               class="first-run-btn primary"
               type="button"
@@ -137,7 +137,7 @@ export function FirstRun() {
             </button>
           )}
           <button class="first-run-btn" type="button" onClick={dismiss}>
-            {data?.modesInstalled && data?.plan2cursorInstalled
+            {data?.modesInstalled && data?.plansInstalled
               ? "Done"
               : "Skip"}
           </button>

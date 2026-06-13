@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as tokenCounters from './tokenCounters';
 import { log } from './logger';
 import { deleteSessionImages } from './sessionImages';
+import * as settings from './settings';
 
 type PostMessageFn = (message: any) => void;
 
@@ -24,6 +25,12 @@ interface ConversationData {
 	// issued, so a resumed session never re-fires title generation.
 	title?: string;
 	titleLocked?: boolean;
+	// Per-conversation spawn preferences (model/effort/thoughts). Portable across
+	// IDE ports; used by eager first-spawn to resume with the conversation's own
+	// settings. Missing fields fall through to workspaceState/config defaults.
+	model?: string;
+	effort?: string;
+	thoughtsOn?: boolean;
 }
 
 interface ConversationDeps {
@@ -89,6 +96,21 @@ export function getLatestConversation(): any | undefined {
 
 export function getConversationIndex(): typeof conversationIndex {
 	return conversationIndex;
+}
+
+// Resolve spawn prefs for eager first-spawn: prioritize the conversation's saved
+// prefs (portable), fall back to workspaceState (transitional), then config default.
+// Missing conversation fields (old records) silently fall through the chain.
+export function resolveSpawnPrefs(conversationData?: ConversationData | { model?: string; effort?: string; thoughtsOn?: boolean }): {
+	model: string;
+	effort: string | undefined;
+	thoughtsOn: boolean;
+} {
+	const model = conversationData?.model || settings.getSelectedModel();
+	const effort = conversationData?.effort !== undefined ? conversationData.effort : settings.getEffort();
+	const thoughtsOn = conversationData?.thoughtsOn !== undefined ? conversationData.thoughtsOn : settings.getThoughtsOn();
+	log.debug('Conversation', 'resolveSpawnPrefs', { model, effort, thoughtsOn, hadConvPrefs: !!conversationData?.model }, '🔍');
+	return { model, effort, thoughtsOn };
 }
 
 export function sendConversationList(): void {
@@ -173,7 +195,10 @@ async function doSaveCurrentConversation(): Promise<void> {
 			messages: currentConversation,
 			filename,
 			title: currentTitle,
-			titleLocked: currentTitleLocked
+			titleLocked: currentTitleLocked,
+			model: settings.getSelectedModel(),
+			effort: settings.getEffort(),
+			thoughtsOn: settings.getThoughtsOn()
 		};
 
 		const filePath = path.join(conversationsPath, filename);

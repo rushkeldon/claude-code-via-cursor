@@ -21,6 +21,9 @@ export function App() {
     // The host defers firstRunPrompt until this arrives — posting it earlier
     // would drop it, since the message bus doesn't buffer pre-mount messages.
     post({ type: 'webviewReady' });
+    // Ask for companion-skill install state up front (not only when Settings
+    // opens) so the plan-phase picker can gate on plansInstalled from first paint.
+    post({ type: 'checkSkillsInstalled' } as any);
   }, []);
 
   useEffect(() => {
